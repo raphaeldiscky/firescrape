@@ -1,0 +1,46 @@
+apiUrl: http://localhost:3002
+concurrency: 5
+
+retries:
+  attempts: 3
+  initialDelayMs: 500
+
+# Chrome DevTools Protocol — only used when engine is "cdp".
+# Launch Chrome with: --remote-debugging-port=9222 --user-data-dir=...
+cdp:
+  url: http://localhost:9222
+
+profiles:
+  default:
+    formats: [markdown]
+    onlyMainContent: true
+
+  docs:
+    formats: [markdown]
+    onlyMainContent: true
+    excludeTags: [nav, footer, ".sidebar"]
+
+  with-shot:
+    formats: [markdown, screenshot]
+    waitFor: 2000
+
+  # For paywalled sites: drives your real Chrome (logged-in) over CDP.
+  paywalled:
+    engine: cdp
+    formats: [markdown]
+    waitFor: 3000
+
+domains:
+  "example.com":
+    headers:
+      Cookie: "${EXAMPLE_COOKIE}"
+      User-Agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+  "*.docs.io":
+    waitFor: 3000
+
+  # Always use your real Chrome for these hosts.
+  "www.nytimes.com":
+    engine: cdp
+  "*.substack.com":
+    engine: cdp
+    waitFor: 2000
