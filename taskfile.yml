@@ -1,0 +1,170 @@
+version: '3'
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # ----- Lifecycle -----
+  setup:
+    desc: First-time build (downloads + builds all images, ~5-10 min)
+    cmds:
+      - docker compose build
+
+  up:
+    desc: Start all services in the background
+    cmds:
+      - docker compose up -d
+      - echo "API → http://localhost:3002"
+      - echo "Queue UI → http://localhost:3002/admin/CHANGEME/queues"
+
+  up:fg:
+    desc: Start all services in the foreground (Ctrl-C to stop)
+    cmds:
+      - docker compose up
+
+  down:
+    desc: Stop all services (keeps volumes)
+    cmds:
+      - docker compose down
+
+  restart:
+    desc: Restart all services
+    cmds:
+      - docker compose restart
+
+  rebuild:
+    desc: Rebuild images and restart (use after code changes)
+    cmds:
+      - docker compose build
+      - docker compose up -d
+
+  clean:
+    desc: Stop services AND wipe volumes (DESTRUCTIVE — clears Redis/Postgres state)
+    prompt: This deletes all queue + DB state. Continue?
+    cmds:
+      - docker compose down -v
+
+  # ----- Observability -----
+  ps:
+    desc: Show container status
+    cmds:
+      - docker compose ps
+
+  logs:
+    desc: Tail logs from all services
+    cmds:
+      - docker compose logs -f --tail=100
+
+  logs:api:
+    desc: Tail logs from the api container only
+    cmds:
+      - docker compose logs -f --tail=100 api
+
+  logs:playwright:
+    desc: Tail logs from the playwright-service container only
+    cmds:
+      - docker compose logs -f --tail=100 playwright-service
+
+  # ----- Smoke tests -----
+  health:
+    desc: Hit the API root to verify it's up
+    cmds:
+      - curl -sS http://localhost:3002/ || echo "API not responding"
+
+  test:scrape:
+    desc: Run a sample /v1/scrape against firecrawl.dev
+    cmds:
+      - |
+        curl -sS -X POST http://localhost:3002/v1/scrape \
+          -H 'Content-Type: application/json' \
+          -d '{"url":"https://firecrawl.dev","formats":["markdown"]}'
+
+  test:crawl:
+    desc: Kick off a sample /v1/crawl against firecrawl.dev
+    cmds:
+      - |
+        curl -sS -X POST http://localhost:3002/v1/crawl \
+          -H 'Content-Type: application/json' \
+          -d '{"url":"https://firecrawl.dev","limit":5}'
+
+  # ----- Shells -----
+  shell:api:
+    desc: Open a shell in the api container
+    cmds:
+      - docker compose exec api sh
+
+  shell:redis:
+    desc: Open redis-cli
+    cmds:
+      - docker compose exec redis redis-cli
+
+  # ----- Scraper CLI (run via tsx — no build needed) -----
+  scraper:install:
+    desc: Install scraper deps
+    dir: apps/scraper
+    cmds:
+      - pnpm install
+
+  scraper:typecheck:
+    desc: Typecheck scraper with tsgo
+    dir: apps/scraper
+    cmds:
+      - pnpm exec tsgo --noEmit
+
+  scraper:lint:
+    desc: Lint scraper with oxlint
+    dir: apps/scraper
+    cmds:
+      - pnpm exec oxlint .
+
+  scraper:format:
+    desc: Format scraper with oxfmt
+    dir: apps/scraper
+    cmds:
+      - pnpm exec oxfmt --write .
+
+  scraper:test:
+    desc: Run scraper unit tests with vitest
+    dir: apps/scraper
+    cmds:
+      - pnpm exec vitest run
+
+  scraper:build:
+    desc: Bundle scraper with tsdown (optional — tsx is the default runner)
+    dir: apps/scraper
+    cmds:
+      - pnpm exec tsdown
+
+  scrape:
+    desc: 'Scrape one URL → markdown on stdout. Usage: task scrape -- https://example.com'
+    dir: apps/scraper
+    env:
+      SCRAPER_INVOKE_CWD: "{{.USER_WORKING_DIR}}"
+    cmds:
+      - pnpm exec tsx src/cli.ts scrape {{.CLI_ARGS}}
+
+  scrape:batch:
+    desc: 'Batch scrape from file. Usage: task scrape:batch -- --file urls.txt --out ./out/'
+    dir: apps/scraper
+    env:
+      SCRAPER_INVOKE_CWD: "{{.USER_WORKING_DIR}}"
+    cmds:
+      - pnpm exec tsx src/cli.ts batch {{.CLI_ARGS}}
+
+  crawl:
+    desc: 'Crawl a site. Usage: task crawl -- https://example.com --limit 50 --out ./crawl/'
+    dir: apps/scraper
+    env:
+      SCRAPER_INVOKE_CWD: "{{.USER_WORKING_DIR}}"
+    cmds:
+      - pnpm exec tsx src/cli.ts crawl {{.CLI_ARGS}}
+
+  map:
+    desc: 'List URLs on a site. Usage: task map -- https://example.com'
+    dir: apps/scraper
+    env:
+      SCRAPER_INVOKE_CWD: "{{.USER_WORKING_DIR}}"
+    cmds:
+      - pnpm exec tsx src/cli.ts map {{.CLI_ARGS}}

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.scraper-state/
+*.log
+scraper.config.yaml
