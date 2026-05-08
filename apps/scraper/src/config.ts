@@ -74,10 +74,7 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(`^${escaped}$`, "i");
 }
 
-export function resolveDomainOverride(
-  config: Config,
-  url: string,
-): Profile | undefined {
+export function resolveDomainOverride(config: Config, url: string): Profile | undefined {
   let host: string;
   try {
     host = new URL(url).hostname;
@@ -97,12 +94,7 @@ export function mergeProfiles(...profiles: (Profile | undefined)[]): Profile {
     if (!p) continue;
     for (const [k, v] of Object.entries(p)) {
       if (v === undefined) continue;
-      if (
-        k === "headers" &&
-        typeof v === "object" &&
-        v !== null &&
-        !Array.isArray(v)
-      ) {
+      if (k === "headers" && typeof v === "object" && v !== null && !Array.isArray(v)) {
         out.headers = { ...out.headers, ...(v as Record<string, string>) };
       } else {
         (out as Record<string, unknown>)[k] = v;

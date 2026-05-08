@@ -1,10 +1,5 @@
 import type { ScrapeRequest } from "../client.js";
-import {
-  type Config,
-  mergeProfiles,
-  type Profile,
-  resolveDomainOverride,
-} from "../config.js";
+import { type Config, mergeProfiles, type Profile, resolveDomainOverride } from "../config.js";
 import { createEnginePool, type EngineName } from "../engines/index.js";
 import { getFormat } from "../formats/index.js";
 import { ArgInput } from "../inputs/arg.js";
@@ -28,11 +23,7 @@ export function buildRequest(
 ): ScrapeRequest {
   const profile: Profile | undefined = config.profiles[profileName];
   const domainOverride = resolveDomainOverride(config, url);
-  const merged = mergeProfiles(
-    config.profiles["default"],
-    profile,
-    domainOverride,
-  );
+  const merged = mergeProfiles(config.profiles["default"], profile, domainOverride);
   const fmts = merged.formats && merged.formats.length > 0 ? merged.formats : apiFormats;
   return {
     url,
@@ -69,12 +60,7 @@ export async function runScrape(opts: ScrapeCmdOptions): Promise<void> {
   try {
     const input = new ArgInput([opts.url]);
     for await (const url of input.read()) {
-      const engineName = resolveEngine(
-        url,
-        opts.config,
-        opts.profileName,
-        opts.engineOverride,
-      );
+      const engineName = resolveEngine(url, opts.config, opts.profileName, opts.engineOverride);
       const engine = pool.get(engineName);
       const req = buildRequest(url, opts.config, opts.profileName, fmt.apiFormats);
       const data = await engine.scrape(req);

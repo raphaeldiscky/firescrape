@@ -1,0 +1,58 @@
+name: scraper-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/scraper/**"
+      - ".github/workflows/scraper-ci.yml"
+  pull_request:
+    paths:
+      - "apps/scraper/**"
+      - ".github/workflows/scraper-ci.yml"
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  scraper:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/scraper
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: apps/scraper/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm exec oxfmt --check .
+
+      - name: Lint
+        run: pnpm exec oxlint .
+
+      - name: Typecheck
+        run: pnpm exec tsgo --noEmit
+
+      - name: Test
+        run: pnpm exec vitest run
+
+      - name: Build
+        run: pnpm exec tsdown

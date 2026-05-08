@@ -60,15 +60,9 @@ export class CdpEngine implements Engine {
       codeBlockStyle: "fenced",
       bulletListMarker: "-",
     });
-    td.remove([
-      "script",
-      "style",
-      "noscript",
-      "iframe",
-      "head",
-      "meta",
-      "link",
-    ] as Parameters<typeof td.remove>[0]);
+    td.remove(["script", "style", "noscript", "iframe", "head", "meta", "link"] as Parameters<
+      typeof td.remove
+    >[0]);
     td.addRule("svg", { filter: "svg" as never, replacement: () => "" });
     return td;
   })();
@@ -185,9 +179,7 @@ export class CdpEngine implements Engine {
         out.links = await page.evaluate(() =>
           [
             ...new Set(
-              [...document.querySelectorAll("a[href]")].map(
-                (a) => (a as HTMLAnchorElement).href,
-              ),
+              [...document.querySelectorAll("a[href]")].map((a) => (a as HTMLAnchorElement).href),
             ),
           ].filter((h) => h.startsWith("http")),
         );
@@ -200,8 +192,7 @@ export class CdpEngine implements Engine {
 
       const meta = await page.evaluate(() => {
         const get = (sel: string): string | undefined =>
-          (document.querySelector(sel) as HTMLMetaElement | null)?.content ??
-          undefined;
+          (document.querySelector(sel) as HTMLMetaElement | null)?.content ?? undefined;
         return {
           title: document.title || undefined,
           description: get('meta[name="description"]'),

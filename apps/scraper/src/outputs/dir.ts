@@ -15,7 +15,7 @@ function sanitize(part: string): string {
   return out.replace(/\.+$/, "");
 }
 
-function urlToRelPath(url: string, ext: string): string {
+export function urlToRelPath(url: string, ext: string): string {
   let parsed: URL;
   try {
     parsed = new URL(url);

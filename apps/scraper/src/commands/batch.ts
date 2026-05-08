@@ -43,9 +43,7 @@ export async function runBatch(opts: BatchCmdOptions): Promise<void> {
   }
 
   if (opts.resume) {
-    process.stderr.write(
-      `${state.completed.size} already done, ${urls.length} to do\n`,
-    );
+    process.stderr.write(`${state.completed.size} already done, ${urls.length} to do\n`);
   }
 
   const progress = makeProgress({
@@ -61,12 +59,7 @@ export async function runBatch(opts: BatchCmdOptions): Promise<void> {
   const tasks = urls.map((url) =>
     limit(async () => {
       try {
-        const engineName = resolveEngine(
-          url,
-          opts.config,
-          opts.profileName,
-          opts.engineOverride,
-        );
+        const engineName = resolveEngine(url, opts.config, opts.profileName, opts.engineOverride);
         const engine = pool.get(engineName);
         const req = buildRequest(url, opts.config, opts.profileName, fmt.apiFormats);
         const data = await engine.scrape(req);
