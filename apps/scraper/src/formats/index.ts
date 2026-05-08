@@ -14,9 +14,7 @@ export const formats: Record<string, Format> = {
 export function getFormat(name: string): Format {
   const f = formats[name];
   if (!f) {
-    throw new Error(
-      `Unknown format "${name}". Available: ${Object.keys(formats).join(", ")}`,
-    );
+    throw new Error(`Unknown format "${name}". Available: ${Object.keys(formats).join(", ")}`);
   }
   return f;
 }

@@ -110,14 +110,11 @@ export class Client {
   }
 
   async map(req: MapRequest): Promise<string[]> {
-    const env = await this.request<ApiEnvelope<unknown> & { links?: string[] }>(
-      "/v1/map",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req),
-      },
-    );
+    const env = await this.request<ApiEnvelope<unknown> & { links?: string[] }>("/v1/map", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
     if (env.links && Array.isArray(env.links)) return env.links;
     if (env.data && Array.isArray(env.data)) return env.data as string[];
     throw new Error(`map failed: ${env.error ?? "no links"}`);
@@ -150,7 +147,11 @@ export class Client {
       const fresh = data.slice(seen);
       seen = data.length;
       yield { status, pages: fresh };
-      if (status.status === "completed" || status.status === "failed" || status.status === "cancelled") {
+      if (
+        status.status === "completed" ||
+        status.status === "failed" ||
+        status.status === "cancelled"
+      ) {
         return;
       }
       await sleep(pollMs);

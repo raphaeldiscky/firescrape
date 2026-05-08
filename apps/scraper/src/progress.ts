@@ -39,10 +39,7 @@ class NoopProgress implements Progress {
   stop(): void {}
 }
 
-export function makeProgress(opts: {
-  enabled: boolean;
-  outputIsStdout: boolean;
-}): Progress {
+export function makeProgress(opts: { enabled: boolean; outputIsStdout: boolean }): Progress {
   if (!opts.enabled) return new NoopProgress();
   if (opts.outputIsStdout) return new NoopProgress();
   if (!process.stderr.isTTY) return new NoopProgress();

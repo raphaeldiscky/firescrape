@@ -9,10 +9,7 @@ export interface EnginePool {
   closeAll(): Promise<void>;
 }
 
-export function createEnginePool(
-  config: Config,
-  cdpUrlOverride: string | undefined,
-): EnginePool {
+export function createEnginePool(config: Config, cdpUrlOverride: string | undefined): EnginePool {
   const cache = new Map<EngineName, Engine>();
   const cdpUrl = cdpUrlOverride ?? config.cdp?.url ?? "http://localhost:9222";
 
@@ -23,9 +20,7 @@ export function createEnginePool(
       const engine: Engine =
         name === "cdp"
           ? new CdpEngine(cdpUrl)
-          : new ApiEngine(
-              new Client({ apiUrl: config.apiUrl, retries: config.retries }),
-            );
+          : new ApiEngine(new Client({ apiUrl: config.apiUrl, retries: config.retries }));
       cache.set(name, engine);
       return engine;
     },
