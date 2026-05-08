@@ -82,10 +82,10 @@ Two backends, picked per request. The default `api` engine forwards to your self
 
 Both engines use the same HTML→markdown converter (`turndown` — the same library Firecrawl itself ships in `apps/api`). The `cdp` engine adds a Firecrawl-style preprocessing pass: strips `script`/`style`/`nav`/`footer`/ads/modals/cookie banners, removes inline event handlers and `style` attrs, and (when `onlyMainContent: true`) runs Mozilla Readability for article extraction.
 
-| Engine | When to use | Limitations |
-|---|---|---|
-| `api` (default) | Public sites, sites without strong bot defense | Vanilla Playwright fingerprint; loses to Cloudflare/Akamai |
-| `cdp` | Paywalled sites you're logged into; sites that block headless Chromium | Single-URL `scrape`/`batch` only (no `crawl`/`map`); requires Chrome running with `--remote-debugging-port` |
+| Engine          | When to use                                                            | Limitations                                                                                                 |
+| --------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `api` (default) | Public sites, sites without strong bot defense                         | Vanilla Playwright fingerprint; loses to Cloudflare/Akamai                                                  |
+| `cdp`           | Paywalled sites you're logged into; sites that block headless Chromium | Single-URL `scrape`/`batch` only (no `crawl`/`map`); requires Chrome running with `--remote-debugging-port` |
 
 **Resolution order** (winner takes all): `--engine` flag → `domains.<host>.engine` in YAML → `profiles.<name>.engine` → default `api`.
 
@@ -98,6 +98,7 @@ Only for sites you have a legitimate subscription to. Pick one of three approach
 Launch a dedicated Chrome instance with a CDP port open, log into your subscription **once** in that window, then point the scraper at it. Bot detection passes because there is no bot — it's your real browser.
 
 **One-time setup (Linux):**
+
 ```bash
 mkdir -p "$HOME/.scraper-chrome"
 google-chrome \
@@ -109,6 +110,7 @@ google-chrome \
 ```
 
 **One-time setup (macOS):**
+
 ```bash
 open -na "Google Chrome" --args \
   --remote-debugging-port=9222 \
@@ -116,11 +118,13 @@ open -na "Google Chrome" --args \
 ```
 
 **Verify the port is open:**
+
 ```bash
 curl -s http://localhost:9222/json/version | jq .Browser
 ```
 
 **Scrape:**
+
 ```bash
 # explicit per-call
 task scrape -- https://www.nytimes.com/... --engine cdp
@@ -223,3 +227,5 @@ Interfaces: `Format`, `InputSource`, `OutputWriter` (in each dir's `types.ts`).
 | `vitest`           | Tests                                                   |
 
 All deps pinned exact (no `^`/`~`).
+
+CI runs typecheck + lint + tests + build on every push or PR that touches `apps/scraper/**` (`.github/workflows/scraper-ci.yml`).

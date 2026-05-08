@@ -92,8 +92,7 @@ program
       profileName: g["profile"] as string,
       formatName: g["format"] as string,
       out: resolvePath(local["out"] as string | undefined),
-      concurrency:
-        (local["concurrency"] as number | undefined) ?? config.concurrency,
+      concurrency: (local["concurrency"] as number | undefined) ?? config.concurrency,
       resume: Boolean(local["resume"]),
       progress: local["progress"] !== false,
       engineOverride: parseEngine(g["engine"]),
@@ -107,14 +106,8 @@ program
   .option("-o, --out <path>", "output path (file, dir/, or '-' for stdout)")
   .option("--limit <n>", "max pages", (v) => Number.parseInt(v, 10))
   .option("--max-depth <n>", "max link depth", (v) => Number.parseInt(v, 10))
-  .option(
-    "--include-paths <patterns...>",
-    "regex(es) of paths to include",
-  )
-  .option(
-    "--exclude-paths <patterns...>",
-    "regex(es) of paths to exclude",
-  )
+  .option("--include-paths <patterns...>", "regex(es) of paths to include")
+  .option("--exclude-paths <patterns...>", "regex(es) of paths to exclude")
   .option("--poll-ms <ms>", "polling interval", (v) => Number.parseInt(v, 10), 2000)
   .option("--no-progress", "disable progress bar")
   .action(async (url: string, _opts: Record<string, unknown>, cmd: Command) => {

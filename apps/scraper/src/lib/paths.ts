@@ -7,6 +7,7 @@ import { isAbsolute, resolve } from "node:path";
  */
 export function resolveUserPath(p: string): string {
   if (isAbsolute(p) || p === "-") return p;
-  const base = process.env["SCRAPER_INVOKE_CWD"] ?? process.cwd();
+  const env = process.env["SCRAPER_INVOKE_CWD"];
+  const base = env && env.length > 0 ? env : process.cwd();
   return resolve(base, p);
 }
