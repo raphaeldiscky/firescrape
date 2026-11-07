@@ -86,6 +86,7 @@ export class Client {
         }
         return (await res.json()) as T;
       } catch (err) {
+        init.signal?.throwIfAborted();
         lastErr = err;
         if (attempt < this.opts.retries.attempts) {
           await sleep(this.opts.retries.initialDelayMs * 2 ** attempt);
@@ -97,8 +98,9 @@ export class Client {
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
 
-  async scrape(req: ScrapeRequest): Promise<ScrapeResponseData> {
+  async scrape(req: ScrapeRequest, signal?: AbortSignal): Promise<ScrapeResponseData> {
     const env = await this.request<ApiEnvelope<ScrapeResponseData>>("/v1/scrape", {
+      ...(signal ? { signal } : {}),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
