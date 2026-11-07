@@ -2,7 +2,6 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ScrapeResponseData } from "../formats/types.js";
 import type { MediaResult } from "./download.js";
-import { pagePath } from "./paths.js";
 
 export interface PageResult {
   url: string;
@@ -41,24 +40,30 @@ export async function savePage(
 ): Promise<void> {
   const dir = join(root, result.path);
   await mkdir(dir, { recursive: true });
-  result.files = [];
-  for (const [key, name] of [
-    ["markdown", "content.md"],
-    ["html", "page.html"],
-    ["rawHtml", "raw.html"],
-  ] as const) {
-    if (typeof data[key] === "string") {
-      await writeFile(join(dir, name), data[key]);
-      result.files.push(name);
-    }
-  }
+  const files: string[] = [];
+  result.files = files;
+  await Promise.all(
+    (
+      [
+        ["markdown", "content.md"],
+        ["html", "page.html"],
+        ["rawHtml", "raw.html"],
+      ] as const
+    ).map(async ([key, name]) => {
+      if (typeof data[key] === "string") {
+        await writeFile(join(dir, name), data[key]);
+        files.push(name);
+      }
+    }),
+  );
+  files.sort();
   if (data.screenshot?.startsWith("data:image/png;base64,")) {
     await writeFile(
       join(dir, "screenshot.png"),
       Buffer.from(data.screenshot.split(",")[1] ?? "", "base64"),
     );
+    files.push("screenshot.png");
   }
-  if (data.screenshot?.startsWith("data:image/png;base64,")) result.files.push("screenshot.png");
   await jsonFile(join(dir, "page.json"), {
     ...result,
     metadata: data.metadata ?? {},
@@ -98,13 +103,13 @@ export async function saveManifest(root: string, manifest: Manifest): Promise<vo
     lines.push(
       `- [${label}](${details}) — ${page.status}${page.reason ? `: ${mdText(page.reason)}` : ""}`,
     );
-    for (const [name, label] of [
+    for (const [name, fileLabel] of [
       ["content.md", "Markdown"],
       ["raw.html", "HTML"],
       ["screenshot.png", "Screenshot"],
     ]) {
       if (name && page.files?.includes(name))
-        lines.push(`  · [${label}](${encodeURI(`${page.path}/${name}`)})`);
+        lines.push(`  · [${fileLabel}](${encodeURI(`${page.path}/${name}`)})`);
     }
     if (page.warning) lines.push(`  · ${mdText(page.warning)}`);
   }
@@ -117,5 +122,3 @@ export async function saveManifest(root: string, manifest: Manifest): Promise<vo
     );
   await writeFile(join(root, "index.md"), `${lines.join("\n")}\n`);
 }
-
-export { pagePath };
