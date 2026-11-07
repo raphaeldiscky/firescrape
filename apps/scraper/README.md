@@ -56,6 +56,8 @@ The archive follows accessible same-origin links, including navigation links, an
 
 Images include lazy-loading/responsive sources and posters. Videos must expose direct file URLs; streaming manifests and embedded players remain references. Downloads use destination-scoped browser cookies in CDP mode, but the media transfer uses Node HTTP rather than Chrome's network stack and can still be blocked. CDP does not guarantee undetectable automation.
 
+Every CDP scrape waits for page network activity to be idle for 500 ms before capturing content, then requests below-fold lazy images and waits for images/fonts to finish. Screenshots disable animations. Readiness has a 30-second default budget (or the profile `timeout`); polling/streaming pages that never settle are captured with a warning and `metadata.captureReady: false`. This applies to `scrape`, `batch`, and `archive`, and only waits on the scraper's page, not unrelated browser tabs. The existing profile `waitFor` adds a minimum delay before this readiness check. Network inactivity cannot guarantee that every app has finished rendering; use additional `waitFor` for delayed client-side UI.
+
 Successful pages survive individual failures. `manifest.json` and `index.md` record failed pages/downloads, skipped oversized files, unsupported players, and screenshot warnings. Page/download failures exit nonzero; reaching limits or skipping unsupported/oversized media is normal completion. Ctrl-C preserves the completed work and removes partial media files.
 
 ## Commands

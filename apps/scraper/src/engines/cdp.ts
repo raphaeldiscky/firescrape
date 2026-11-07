@@ -149,6 +149,32 @@ export class CdpEngine implements Engine {
         await page.waitForTimeout(req.waitFor);
       }
 
+      const warnings: string[] = [];
+      const readyTimeout = req.timeout && req.timeout > 0 ? req.timeout : DEFAULT_TIMEOUT;
+      const readyDeadline = Date.now() + readyTimeout;
+      const remaining = (): number => Math.max(1, readyDeadline - Date.now());
+      try {
+        await page.waitForLoadState("networkidle", { timeout: remaining() });
+        // A full-page screenshot includes below-fold images, which lazy loading
+        // otherwise leaves blank without issuing their requests.
+        await page.evaluate(() => {
+          for (const image of document.images) image.loading = "eager";
+        });
+        await page.waitForFunction(
+          () =>
+            (!document.fonts || document.fonts.status === "loaded") &&
+            [...document.images].every((image) => image.complete),
+          undefined,
+          { timeout: remaining() },
+        );
+      } catch (err) {
+        signal?.throwIfAborted();
+        if (!(err instanceof Error) || err.name !== "TimeoutError") throw err;
+        warnings.push(
+          `Page readiness timed out after ${readyTimeout} ms; some content may still be loading.`,
+        );
+      }
+
       const rawHtml = await page.content();
       const wantedFormats = new Set(req.formats ?? ["markdown"]);
       const out: ScrapeResponseData = {};
@@ -169,6 +195,7 @@ export class CdpEngine implements Engine {
         url: page.url(),
         statusCode: response?.status() ?? null,
         retryAfter: response?.headers()["retry-after"],
+        captureReady: warnings.length === 0,
       };
       if (wantedFormats.has("links")) {
         out.links = await page.evaluate(() =>
@@ -181,12 +208,17 @@ export class CdpEngine implements Engine {
       }
       if (wantedFormats.has("screenshot")) {
         try {
-          const buf = await page.screenshot({ fullPage: true, type: "png" });
+          const buf = await page.screenshot({
+            fullPage: true,
+            type: "png",
+            animations: "disabled",
+          });
           out.screenshot = `data:image/png;base64,${buf.toString("base64")}`;
         } catch (err) {
           signal?.throwIfAborted();
-          out["warning"] =
-            `Screenshot unavailable: ${err instanceof Error ? err.message : String(err)}`;
+          warnings.push(
+            `Screenshot unavailable: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
@@ -231,6 +263,7 @@ export class CdpEngine implements Engine {
       if (wantedFormats.has("rawHtml")) out.rawHtml = rawHtml;
       if (wantedFormats.has("markdown")) out.markdown = this.turndown.turndown(html);
 
+      if (warnings.length > 0) out["warning"] = warnings.join(" ");
       return out;
     } finally {
       signal?.removeEventListener("abort", abort);

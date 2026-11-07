@@ -22,6 +22,8 @@ function fixture() {
     addInitScript: vi.fn(),
     setExtraHTTPHeaders: vi.fn(),
     goto: vi.fn().mockResolvedValue({ status: () => 200, headers: () => ({}) }),
+    waitForLoadState: vi.fn(),
+    waitForFunction: vi.fn(),
     content: vi.fn(async () => dom.serialize()),
     evaluate: vi.fn(async (fn: Function, arg?: unknown) =>
       dom.window.Function("arg", `return (${fn.toString()})(arg)`)(arg),
@@ -68,6 +70,50 @@ describe("CDP capture", () => {
     expect(context.newPage).toHaveBeenCalledOnce();
     await engine.close();
     expect(browser.close).toHaveBeenCalledOnce();
+    dom.window.close();
+  });
+
+  it("waits for request completion and images before capturing hydrated content", async () => {
+    const { page, dom } = fixture();
+    page.waitForLoadState.mockImplementation(async () => {
+      dom.window.document.querySelector("main")!.textContent = "Loaded test cards";
+    });
+    page.waitForFunction.mockImplementation(async () => {
+      expect(page.waitForLoadState).toHaveBeenCalledWith(
+        "networkidle",
+        expect.objectContaining({ timeout: expect.any(Number) }),
+      );
+    });
+    const data = await new CdpEngine("http://localhost:9222").scrape({
+      url: "https://example.com/",
+      formats: ["markdown", "rawHtml", "screenshot"],
+    });
+    expect(data.markdown).toContain("Loaded test cards");
+    expect(data.rawHtml).toContain("Loaded test cards");
+    expect(data.metadata?.["captureReady"]).toBe(true);
+    expect(page.screenshot).toHaveBeenCalledWith({
+      fullPage: true,
+      type: "png",
+      animations: "disabled",
+    });
+    dom.window.close();
+  });
+
+  it("bounds readiness waiting and records timeouts without discarding content", async () => {
+    const { page, dom } = fixture();
+    const timeout = new Error("still polling");
+    timeout.name = "TimeoutError";
+    page.waitForLoadState.mockRejectedValue(timeout);
+    const data = await new CdpEngine("http://localhost:9222").scrape({
+      url: "https://example.com/",
+      formats: ["markdown", "screenshot"],
+      timeout: 50,
+    });
+    expect(data.metadata?.["captureReady"]).toBe(false);
+    expect(data["warning"]).toMatch(/readiness timed out after 50 ms/);
+    expect(data.markdown).toContain("Hello");
+    expect(page.waitForFunction).not.toHaveBeenCalled();
+    expect(page.close).toHaveBeenCalledOnce();
     dom.window.close();
   });
 
