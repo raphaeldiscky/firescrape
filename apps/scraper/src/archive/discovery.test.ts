@@ -38,6 +38,16 @@ describe("archive discovery", () => {
     expect(urls.some((url) => url.startsWith("data:"))).toBe(false);
   });
 
+  it("ignores SVG-local filter references inside inline data images", () => {
+    const result = discover(
+      `<div style="background: url(data:image/svg+xml,filter:url(%23b))"></div>
+      <div style="filter: url(#filter)"></div><video src="blob:https://example.com/id"></video>`,
+      "https://example.com/",
+    );
+    expect(result.media.filter((m) => m.kind === "image")).toEqual([]);
+    expect(result.media.find((m) => m.kind === "video")?.skipReason).toMatch(/Browser-local/);
+  });
+
   it("enforces origin, skips binary/action URLs, and retains distinct queries", () => {
     for (const path of [
       "/logout",

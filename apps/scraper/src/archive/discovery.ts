@@ -12,7 +12,7 @@ const STREAM = /\.(?:m3u8|mpd)(?:$|[?#])/i;
 const NON_PAGE =
   /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp|mp4|m4v|mov|ogv|webm|mp3|wav|ogg|m3u8|mpd|pdf|zip|gz|css|js|woff2?|ttf)(?:$|[?#])/i;
 const ACTION =
-  /(?:^|[\/_-])(?:log[-_]?out|log[-_]?off|sign[-_]?out|sign[-_]?off|delete|remove)(?:$|[\/_-])/i;
+  /(?:^|[/_-])(?:log[-_]?out|log[-_]?off|sign[-_]?out|sign[-_]?off|delete|remove)(?:$|[/_-])/i;
 
 export function httpUrl(value: string, base?: string): string | undefined {
   try {
@@ -51,7 +51,11 @@ export function discover(html: string, pageUrl: string): { links: string[]; medi
     const links = new Set<string>();
     const media = new Map<string, MediaRef>();
     const add = (value: string | null | undefined, kind: MediaRef["kind"]): void => {
-      if (!value?.trim()) return;
+      if (!value?.trim() || /^(?:#|%23)/i.test(value.trim())) return;
+      if (value.trim().startsWith("blob:")) {
+        media.set(value.trim(), { url: value.trim(), kind, skipReason: "Browser-local media URL" });
+        return;
+      }
       const url = httpUrl(value.trim(), base);
       if (!url) return;
       const skipReason =
