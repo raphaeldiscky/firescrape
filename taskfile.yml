@@ -145,6 +145,11 @@ tasks:
     cmds:
       - pnpm exec tsx src/cli.ts scrape {{.CLI_ARGS}}
 
+  # Both archive tasks default to 100 attempted URLs and stop sooner if no links remain.
+  # --limit caps URL attempts (including failures/redirects), not depth or elapsed time.
+  # Examples: task scrape:all:cdp -- "https://example.com" --limit 500
+  #           task scrape:all:api -- "https://example.com" --limit 500
+  # Use --limit 1 to archive only the supplied URL.
   scrape:all:cdp:
     desc: 'Archive a site through Chrome/CDP into data/. Usage: task scrape:all:cdp -- https://example.com'
     dir: apps/scraper

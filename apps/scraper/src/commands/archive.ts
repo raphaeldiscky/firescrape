@@ -90,6 +90,8 @@ export async function runArchive(
     let nextAt = 0;
     await saveManifest(root, manifest);
     try {
+      // Visit links breadth-first until the queue is exhausted or --limit attempts
+      // are reached (default 100). Failures/redirects count too; this is not a depth limit.
       for (let i = 0; i < queue.length && i < opts.limit; i++) {
         opts.signal?.throwIfAborted();
         await sleep(Math.max(0, nextAt - Date.now()), undefined, { signal: opts.signal });
