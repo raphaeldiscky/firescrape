@@ -8,12 +8,26 @@ Run via `tsx` — no build step needed. Tasks live in the repo-root `taskfile.ym
 
 ```bash
 task scraper:install                                  # one-time
+task scraper                                          # interactive: pick everything in the terminal
 task scrape -- https://example.com                    # markdown → stdout
 task scrape -- https://example.com -o page.md
 task scrape:batch -- --file urls.txt --out ./out/
 task crawl -- https://docs.example.com --limit 50 --out ./docs/
 task map -- https://example.com --limit 100
 ```
+
+## Interactive wizard (`task scraper`)
+
+`task scraper` is the one entry point for archiving and transcription. It opens a terminal wizard ([Ink](https://github.com/vadimdemedes/ink)) where every option is picked with the arrow keys, Space and Enter; Esc goes back a step and Ctrl+C quits.
+
+1. **What do you want to do?** Archive a site · Transcribe existing files · Set up transcription.
+2. **Archive a site** asks for the URL, then the **engine**: _Chrome via CDP (your logged-in browser)_ or _Firecrawl API_. Choosing CDP asks for the DevTools URL (default `http://localhost:9222`) and checks it live. When nothing answers it offers to **start a dedicated Chrome on that port** (profile `~/.scraper-chrome`, left open after the run so your logins persist), check again, or switch to the API. Then: Play-button clicking, page limit, delay, which media to download (images, video, audio), the size cap, whether to **transcribe** audio and video, how many transcription workers, the spoken language, and the output directory.
+3. **Transcribe existing files** lists recent archive runs in `data/` that have audio or video, or takes a path to a media file or folder.
+4. **Set up transcription** builds whisper.cpp and downloads the model (see below). Choosing transcription before it is set up offers to do this before the run starts.
+
+A review screen lists every choice; Enter starts the run. The run shows a live dashboard: the pages bar and current URL, the active download, **one row per transcription worker** with its file and progress, counts, recent errors and the output path. Ctrl+C stops the run, keeps everything finished so far and marks it `interrupted`.
+
+The flag-based tasks below run the same code without the wizard, for scripts. On a terminal they show the same dashboard; `--no-ui` (or redirected output) prints plain progress lines instead.
 
 ## Archive a whole site
 
@@ -30,6 +44,9 @@ task scrape:all:cdp -- "https://example.com" --limit 25 --max-media-mb 20 --dela
 # Audio/video that loads only after a Play click (CDP only)
 task scrape:all:cdp -- "https://example.com/listening-test" --play-media
 task scrape:all:api -- "https://example.com" --out ./my-archives/
+
+# Only some media kinds, and transcribe audio/video while crawling
+task scrape:all:cdp -- "https://example.com" --media audio,video --transcribe --transcribe-workers 2
 ```
 
 Run `task scraper:install` once first. CDP requires Chrome launched with a dedicated profile and debugging port; see the Chrome setup below. It reuses that context's cookies. For signed-in archives, log into the target site in that same dedicated Chrome profile before running the command; sessions in another Chrome profile are separate. Set a profile `waitFor` value for pages that load account data after navigation. Each shortcut explicitly selects its engine, regardless of profile/domain engine settings; unavailable CDP never falls back to the API. API startup applies only to local HTTP endpoints and leaves the services running; stop them with `task down`. Remote API endpoints must already be available.
@@ -46,15 +63,16 @@ data/<hostname>/<UTC-timestamp>-<unique-id>/
 │   ├── raw.html
 │   ├── page.json            # Metadata, links and media references
 │   └── screenshot.png       # CDP only, when capture succeeds
-└── assets/
-    ├── images/
-    ├── audio/
-    └── videos/
+├── assets/
+│   ├── images/
+│   ├── audio/
+│   └── videos/
+└── transcripts/             # With transcription: <media name>--<hash>.{txt,srt,vtt,json}
 ```
 
-The command prints the absolute output directory and `index.md` location. Media progress on stderr shows each item’s count, current file, bytes transferred, percentage when the server supplies a usable size, and elapsed seconds. A one-second heartbeat continues while waiting for a response or retrying, and each item ends with downloaded/reused/skipped/failed status. Interactive terminals update the current line; redirected output gets plain progress lines. Query strings are excluded from progress labels. `data/*` is gitignored. Runs never overwrite each other; URL hashes distinguish query variants, and shared media downloads once per run. These are content archives, not offline replicas: HTML keeps its original resource links, while `page.json` maps discovered assets to local files.
+The command prints the absolute output directory and `index.md` location. Without the dashboard (`--no-ui` or redirected output), media progress on stderr shows each item’s count, current file, bytes transferred, percentage when the server supplies a usable size, and elapsed seconds. A one-second heartbeat continues while waiting for a response or retrying, and each item ends with downloaded/reused/skipped/failed status. Interactive terminals update the current line; redirected output gets plain progress lines. Query strings are excluded from progress labels. `data/*` is gitignored. Runs never overwrite each other; URL hashes distinguish query variants, and shared media downloads once per run. These are content archives, not offline replicas: HTML keeps its original resource links, while `page.json` maps discovered assets to local files.
 
-Defaults are **100 attempted pages**, **100 MB per media file** (decimal MB), and a **1,000 ms gap between pages**, processed sequentially. The size cap applies to each file. Use `--limit`, `--max-media-mb`, and `--delay-ms` to change these. Direct CLI usage is `pnpm exec tsx src/cli.ts archive URL --engine cdp` (CDP is its default).
+Defaults are **100 attempted pages**, **100 MB per media file** (decimal MB), and a **1,000 ms gap between pages**, processed sequentially. The size cap applies to each file. Use `--limit`, `--max-media-mb`, and `--delay-ms` to change these. `--media image,video,audio` limits which kinds are downloaded (all three by default); the others are listed in the manifest as skipped. Direct CLI usage is `pnpm exec tsx src/cli.ts archive URL --engine cdp` (CDP is its default).
 
 The archive follows accessible same-origin links, including navigation links, and skips obvious logout/action URLs and non-page files. An initial redirect establishes the origin; later redirects outside it are recorded without expanding them. It does not execute configured profile `actions`, submit forms, discover unlinked pages, automatically scroll, or solve CAPTCHAs. Archive formats and `onlyMainContent: false` are fixed so text-format profile settings cannot hide media or navigation.
 
@@ -66,15 +84,48 @@ Every CDP scrape waits for page network activity to be idle for 500 ms before ca
 
 Successful pages survive individual failures. `manifest.json` and `index.md` record failed pages/downloads, skipped oversized files, unsupported players, and screenshot warnings. Page/download failures exit nonzero; reaching limits or skipping unsupported/oversized media is normal completion. Ctrl-C preserves the completed work and removes partial media files.
 
+## Audio and video transcription
+
+Downloaded audio and video can be transcribed to text **with timestamps** by [whisper.cpp](https://github.com/ggml-org/whisper.cpp) running locally on the GPU. With `--transcribe` (or "Transcribe: yes" in the wizard), each audio or video file is queued as soon as it is downloaded, and N workers transcribe while the crawl continues; the run ends once every queued file is done.
+
+**Setup** happens in the app: `task scraper` → _Set up transcription_. It clones whisper.cpp v1.9.5 into `~/.local/share/firescrape/whisper.cpp`, builds `whisper-cli` with CUDA for the local GPU (a CPU build when `nvcc` is missing), and downloads `ggml-large-v3-turbo-q5_0.bin` (about 550 MB) to `~/.local/share/firescrape/models/`. It needs `git`, `cmake` (for example `uv tool install cmake`) and a C++ compiler, plus `ffmpeg` on `PATH` for decoding. Rerunning it is quick: the checkout and model are reused and the build is incremental.
+
+Each transcript is written in four formats next to each other:
+
+| File    | Contents                                                                                     |
+| ------- | -------------------------------------------------------------------------------------------- |
+| `.txt`  | One segment per line: `[00:01:23.450 → 00:01:27.900] text`                                   |
+| `.srt`  | SubRip subtitles                                                                             |
+| `.vtt`  | WebVTT subtitles                                                                             |
+| `.json` | whisper.cpp's full JSON: segments with millisecond offsets, tokens and the detected language |
+
+In an archive they go to `transcripts/`, and `manifest.json` (`transcripts[]`: status, files, language, duration, segment count) and `index.md` list them. A failed transcription marks the run `partial`.
+
+**Workers.** Each worker is its own `whisper-cli` process with its own copy of the model (about 1 GB of GPU memory for the default model), so 2 workers transcribe two files at once; the CPU threads are split between workers. Default 2.
+
+**Past runs and other files.** `transcribe <paths...>` takes archive run directories (updating their manifest and index), media files (transcripts are written next to each file) or folders (searched recursively). Files that already have a `.txt` transcript are skipped, so it can be rerun after an interruption.
+
+```bash
+pnpm exec tsx src/cli.ts transcribe ../../../data/example.com/2026-11-08T09-05-20-197Z-HkayYJ
+pnpm exec tsx src/cli.ts transcribe ~/Podcasts --transcribe-workers 3 --language en
+```
+
+Overrides: `transcribe.whisperBin` and `transcribe.model` in `scraper.config.yaml`, the `WHISPER_CLI` environment variable for the binary, `FIRESCRAPE_WHISPER_HOME` for the install location, and `--whisper-model <path>` / `--cpu` per run.
+
+Downloaded media is untrusted input, so ffmpeg only opens it as an ordinary local audio/video file: playlist formats such as HLS or ffconcat saved under a media extension are refused.
+
 ## Commands
 
-| Command           | Purpose                                                     |
-| ----------------- | ----------------------------------------------------------- |
-| `scrape <url>`    | Single URL → one document                                   |
-| `batch [urls...]` | Many URLs (args, `--file`, or `--stdin`) → many documents   |
-| `crawl <url>`     | Start a crawl, poll `/v1/crawl/:id`, stream results         |
-| `archive <url>`   | Archive linked pages and discovered image/audio/video files |
-| `map <url>`       | List URLs reachable on a site (no scraping)                 |
+| Command                 | Purpose                                                     |
+| ----------------------- | ----------------------------------------------------------- |
+| `scrape <url>`          | Single URL → one document                                   |
+| `batch [urls...]`       | Many URLs (args, `--file`, or `--stdin`) → many documents   |
+| `crawl <url>`           | Start a crawl, poll `/v1/crawl/:id`, stream results         |
+| `archive <url>`         | Archive linked pages and discovered image/audio/video files |
+| `transcribe <paths...>` | Transcribe archive runs, media files or folders             |
+| `map <url>`             | List URLs reachable on a site (no scraping)                 |
+
+With no command (and a terminal), the CLI opens the interactive wizard.
 
 ### Global options
 
@@ -94,6 +145,12 @@ Successful pages survive individual failures. `manifest.json` and `index.md` rec
 - **batch**: `--file <path>`, `--stdin`, `--concurrency <n>`, `--resume`, `--no-progress`
 - **crawl**: `--limit`, `--max-depth`, `--include-paths`, `--exclude-paths`, `--poll-ms`, `--no-progress`
 - **map**: `--search`, `--limit`, `--ignore-sitemap`, `--include-subdomains`
+- **archive**: `-o, --out`, `--limit`, `--max-media-mb`, `--delay-ms`, `--play-media`, `--media <kinds>`, `--transcribe`, `--no-ui`, and the transcription options below
+- **transcribe**: `--no-ui` and the transcription options:
+  - `--transcribe-workers <n>` (default 2) whisper processes running at once
+  - `--language <code>` (default `auto`) spoken language, e.g. `en`, `id`
+  - `--whisper-model <path>` a different ggml model file
+  - `--cpu` transcribe on the CPU
 
 ## Output formats
 
@@ -124,6 +181,11 @@ domains:
       Cookie: "${EXAMPLE_COOKIE}"
   "*.docs.io":
     waitFor: 3000
+
+# Optional: a whisper.cpp binary and model other than the in-app install
+transcribe:
+  whisperBin: /opt/whisper.cpp/build/bin/whisper-cli
+  model: /opt/models/ggml-large-v3.bin
 ```
 
 **Merge order** (later wins): `default` profile → selected `--profile` → matched `domains.<host>` → CLI flags.
@@ -277,6 +339,7 @@ Interfaces: `Format`, `InputSource`, `OutputWriter` (in each dir's `types.ts`).
 | `tsgo`             | Typecheck (`task scraper:typecheck`)                    |
 | `oxlint` / `oxfmt` | Lint + format (Rust-based)                              |
 | `vitest`           | Tests                                                   |
+| `ink` / `react`    | Terminal wizard and dashboard (`src/ui/`)               |
 
 All deps pinned exact (no `^`/`~`).
 
