@@ -92,7 +92,7 @@ describe("Wizard", () => {
     await press(ENTER);
     expect(onDone).toHaveBeenCalledWith({
       kind: "archive",
-      url: "https://example.com/",
+      urls: ["https://example.com/"],
       engine: "cdp",
       cdpUrl: "http://localhost:9222",
       playMedia: true,
@@ -142,15 +142,48 @@ describe("Wizard", () => {
     await press(ENTER, "example.com", ENTER);
     expect(frame()).toContain("Which engine");
     await press(ESC);
-    expect(frame()).toContain("Which site should be archived?");
+    expect(frame()).toContain("Which site(s) should be archived?");
     expect(frame()).toContain("https://example.com/");
   });
 
   it("rejects an invalid URL and stays on the step", async () => {
     const { press, frame } = setup(deps());
     await press(ENTER, "ftp://nope", ENTER);
-    expect(frame()).toContain("Enter an http(s) URL");
-    expect(frame()).toContain("Which site should be archived?");
+    expect(frame()).toContain("Not an http(s) URL: ftp://nope");
+    expect(frame()).toContain("Which site(s) should be archived?");
+  });
+
+  it("accepts several URLs separated by spaces, dropping duplicates", async () => {
+    const { press, frame } = setup(deps());
+    await press(ENTER, "example.com https://example.org/a example.com", ENTER);
+    expect(frame()).toContain("URLs (2)");
+    expect(frame()).toContain("Which engine");
+  });
+
+  it("takes a pasted multi-line list", async () => {
+    const { press, frame, until, onDone } = setup(
+      deps({ checkCdp: async () => ({ ok: false, error: "ECONNREFUSED" }) }),
+    );
+    await press(ENTER, "\u001B[200~example.com\nexample.org/a\r\nexample.net\n\u001B[201~");
+    expect(frame()).toContain("example.com example.org/a example.net");
+    await press(ENTER, ENTER, ENTER);
+    await until("No Chrome answered");
+    await press(DOWN, DOWN, ENTER); // Use the Firecrawl API instead
+    await press(ENTER, ENTER, ENTER, ENTER, DOWN, ENTER, ENTER, ENTER);
+    expect(frame()).toContain("URLs (3)");
+    await press(ENTER);
+    expect(onDone).toHaveBeenCalledWith(
+      expect.objectContaining({
+        urls: ["https://example.com/", "https://example.org/a", "https://example.net/"],
+      }),
+    );
+  });
+
+  it("names the invalid entry in a list and stays on the step", async () => {
+    const { press, frame } = setup(deps());
+    await press(ENTER, "example.com ftp://nope", ENTER);
+    expect(frame()).toContain("Not an http(s) URL: ftp://nope");
+    expect(frame()).toContain("Which site(s) should be archived?");
   });
 
   it("transcribes a past archive run", async () => {
