@@ -5,11 +5,17 @@ import { runBatch } from "./commands/batch.js";
 import { runCrawl } from "./commands/crawl.js";
 import { runMap } from "./commands/map.js";
 import { runScrape } from "./commands/scrape.js";
+import {
+  runTranscribe,
+  transcribeSettings,
+  type TranscribeChoices,
+} from "./commands/transcribe.js";
 import type { EngineName } from "./engines/index.js";
 import { ArgInput } from "./inputs/arg.js";
 import { FileInput } from "./inputs/file.js";
 import { StdinInput } from "./inputs/stdin.js";
 import type { InputSource } from "./inputs/types.js";
+import { TextReporter } from "./archive/reporter.js";
 import { resolveUserPath } from "./lib/paths.js";
 
 function resolvePath(p: string | undefined): string | undefined {
@@ -20,6 +26,47 @@ function parseEngine(v: unknown): EngineName | undefined {
   if (v === "api" || v === "cdp") return v;
   if (v === undefined) return undefined;
   throw new Error(`--engine must be "api" or "cdp", got "${String(v)}"`);
+}
+
+function parseWorkers(v: string): number {
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < 1)
+    throw new Error(`--transcribe-workers must be a whole number >= 1, got "${v}"`);
+  return n;
+}
+
+function transcribeChoices(local: Record<string, unknown>): TranscribeChoices {
+  return {
+    workers: local["transcribeWorkers"] as number,
+    language: local["language"] as string,
+    model: resolvePath(local["whisperModel"] as string | undefined),
+    cpu: Boolean(local["cpu"]),
+  };
+}
+
+/** Transcription flags shared by `archive --transcribe` and `transcribe`. */
+function transcribeFlags(cmd: Command): Command {
+  return cmd
+    .option("--transcribe-workers <n>", "whisper processes running at once", parseWorkers, 2)
+    .option("--language <code>", "spoken language (e.g. en, id), or auto to detect", "auto")
+    .option("--whisper-model <path>", "ggml model file (default: config, then the installed model)")
+    .option("--cpu", "transcribe on the CPU instead of the GPU", false);
+}
+
+/** Runs `fn` with a signal that Ctrl+C (or SIGTERM) aborts. */
+async function withAbort<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const abort = (): void => {
+    controller.abort();
+  };
+  process.once("SIGINT", abort);
+  process.once("SIGTERM", abort);
+  try {
+    return await fn(controller.signal);
+  } finally {
+    process.removeListener("SIGINT", abort);
+    process.removeListener("SIGTERM", abort);
+  }
 }
 
 const program = new Command();
@@ -53,48 +100,75 @@ program
     });
   });
 
-program
-  .command("archive <url>")
-  .description("Archive linked site pages and download images, audio and direct videos")
-  .option("-o, --out <path>", "archive root directory (default: checkout data/)")
-  .option("--limit <n>", "maximum attempted pages", Number, 100)
-  .option("--max-media-mb <n>", "maximum bytes per media file in decimal MB", Number, 100)
-  .option("--delay-ms <n>", "minimum delay between page navigations", Number, 1000)
-  .option("--play-media", "CDP only: click play controls so on-demand audio/video loads", false)
-  .option("--media <kinds>", "media kinds to download: image,video,audio", parseMediaKinds)
-  .action(async (url: string, _opts: Record<string, unknown>, cmd: Command) => {
-    const g = program.opts();
-    const local = cmd.opts();
-    const config = await loadConfig(resolveUserPath(g["config"] as string));
-    if (g["apiUrl"]) config.apiUrl = g["apiUrl"] as string;
-    const controller = new AbortController();
-    const abort = (): void => {
-      controller.abort();
-    };
-    process.once("SIGINT", abort);
-    process.once("SIGTERM", abort);
-    try {
-      const { manifest } = await runArchive({
-        url,
-        config,
-        profileName: g["profile"] as string,
-        engineName: parseEngine(g["engine"]) ?? "cdp",
-        cdpUrlOverride: g["cdpUrl"] as string | undefined,
-        out: resolvePath(local["out"] as string | undefined),
-        limit: local["limit"] as number,
-        maxMediaMb: local["maxMediaMb"] as number,
-        delayMs: local["delayMs"] as number,
-        playMedia: Boolean(local["playMedia"]),
-        media: local["media"] as MediaKind[] | undefined,
-        signal: controller.signal,
-      });
-      if (manifest.status === "partial") process.exitCode = 1;
-      if (manifest.status === "interrupted") process.exitCode = 130;
-    } finally {
-      process.removeListener("SIGINT", abort);
-      process.removeListener("SIGTERM", abort);
-    }
+transcribeFlags(
+  program
+    .command("archive <url>")
+    .description("Archive linked site pages and download images, audio and direct videos")
+    .option("-o, --out <path>", "archive root directory (default: checkout data/)")
+    .option("--limit <n>", "maximum attempted pages", Number, 100)
+    .option("--max-media-mb <n>", "maximum bytes per media file in decimal MB", Number, 100)
+    .option("--delay-ms <n>", "minimum delay between page navigations", Number, 1000)
+    .option("--play-media", "CDP only: click play controls so on-demand audio/video loads", false)
+    .option("--media <kinds>", "media kinds to download: image,video,audio", parseMediaKinds)
+    .option("--transcribe", "transcribe downloaded audio and video with whisper.cpp", false),
+).action(async (url: string, _opts: Record<string, unknown>, cmd: Command) => {
+  const g = program.opts();
+  const local = cmd.opts();
+  const config = await loadConfig(resolveUserPath(g["config"] as string));
+  if (g["apiUrl"]) config.apiUrl = g["apiUrl"] as string;
+  const choices = transcribeChoices(local);
+  const { manifest } = await withAbort((signal) =>
+    runArchive({
+      url,
+      config,
+      profileName: g["profile"] as string,
+      engineName: parseEngine(g["engine"]) ?? "cdp",
+      cdpUrlOverride: g["cdpUrl"] as string | undefined,
+      out: resolvePath(local["out"] as string | undefined),
+      limit: local["limit"] as number,
+      maxMediaMb: local["maxMediaMb"] as number,
+      delayMs: local["delayMs"] as number,
+      playMedia: Boolean(local["playMedia"]),
+      media: local["media"] as MediaKind[] | undefined,
+      transcribe: local["transcribe"]
+        ? { workers: choices.workers, settings: transcribeSettings(config, choices) }
+        : undefined,
+      signal,
+    }),
+  );
+  if (manifest.status === "partial") process.exitCode = 1;
+  if (manifest.status === "interrupted") process.exitCode = 130;
+});
+
+transcribeFlags(
+  program
+    .command("transcribe <paths...>")
+    .description(
+      "Transcribe archive runs, media files or folders to timestamped SRT, VTT, JSON and TXT",
+    ),
+).action(async (paths: string[], _opts: Record<string, unknown>, cmd: Command) => {
+  const g = program.opts();
+  const config = await loadConfig(resolveUserPath(g["config"] as string));
+  const choices = transcribeChoices(cmd.opts());
+  const reporter = new TextReporter();
+  let interrupted = false;
+  const results = await withAbort((signal) => {
+    signal.addEventListener("abort", () => (interrupted = true));
+    return runTranscribe({
+      inputs: paths.map((p) => resolveUserPath(p)),
+      workers: choices.workers,
+      settings: transcribeSettings(config, choices),
+      onEvent: (event) => reporter.transcription(event),
+      signal,
+    });
   });
+  const count = (status: string): number => results.filter((r) => r.status === status).length;
+  process.stderr.write(
+    `Transcribed ${count("transcribed")}, skipped ${count("skipped")}, failed ${count("failed")}\n`,
+  );
+  if (interrupted) process.exitCode = 130;
+  else if (count("failed") > 0) process.exitCode = 1;
+});
 
 program
   .command("batch")
