@@ -64,7 +64,7 @@ describe("Dashboard", () => {
       worker: undefined,
       result: { input: "/m/b.mp3", status: "skipped" },
     });
-    store.finish("partial", "1 failed");
+    store.finish("partial", `1 failed; see ${"/very/long/path".repeat(12)}/index.md`);
     await settle();
 
     const frame = ui.lastFrame() ?? "";
@@ -72,7 +72,7 @@ describe("Dashboard", () => {
     expect(frame).not.toContain("waiting or running");
     expect(frame).toMatch(/worker 1\s+idle/);
     expect(frame).toContain("a.mp3: whisper-cli exited with 1");
-    expect(frame).toContain("partial 1 failed");
+    expect(frame).toContain("partial 1 failed; see /very/long/path");
     expect(frame).not.toContain("Ctrl+C");
     ui.unmount();
   });

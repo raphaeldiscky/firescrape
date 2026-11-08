@@ -108,6 +108,7 @@ tasks:
     desc: Open the interactive scraper (archive a site, transcribe media, set up transcription)
     dir: apps/cli/scraper
     interactive: true
+    silent: true
     env:
       SCRAPER_INVOKE_CWD: "{{.USER_WORKING_DIR}}"
     cmds:

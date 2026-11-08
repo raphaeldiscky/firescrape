@@ -358,11 +358,14 @@ export function Dashboard({ store }: { store: DashboardStore }) {
         </Box>
       )}
       {s.done && (
-        <Box marginTop={1}>
-          <Text color={STATUS_COLORS[s.done.status] ?? "white"} bold>
-            {s.done.status}
-          </Text>
-          <Text> {s.done.detail}</Text>
+        <Box marginTop={1} gap={1}>
+          {/* A long detail (a path) must wrap rather than squeeze the status word. */}
+          <Box flexShrink={0}>
+            <Text color={STATUS_COLORS[s.done.status] ?? "white"} bold>
+              {s.done.status}
+            </Text>
+          </Box>
+          <Text>{s.done.detail}</Text>
         </Box>
       )}
       {!s.done && (
