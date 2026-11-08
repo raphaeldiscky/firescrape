@@ -29,6 +29,13 @@ export const TRANSCRIPT_EXTENSIONS = [".srt", ".vtt", ".json", ".txt"] as const;
 const WAV_BYTES_PER_SECOND = 16_000 * 2;
 const WAV_HEADER_BYTES = 44;
 
+/**
+ * Demuxers for ordinary audio/video files. Downloaded media is untrusted, and
+ * ffmpeg probes by content, so a playlist (HLS, ffconcat) disguised as `.mp3`
+ * could otherwise make it fetch URLs or read other local files.
+ */
+const INPUT_FORMATS = "mp3,mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,ogg,wav,flac,aac,avi";
+
 export function ffmpegArgs(input: string, wav: string): string[] {
   return [
     "-nostdin",
@@ -36,6 +43,10 @@ export function ffmpegArgs(input: string, wav: string): string[] {
     "-loglevel",
     "error",
     "-y",
+    "-protocol_whitelist",
+    "file",
+    "-format_whitelist",
+    INPUT_FORMATS,
     "-i",
     input,
     "-vn",

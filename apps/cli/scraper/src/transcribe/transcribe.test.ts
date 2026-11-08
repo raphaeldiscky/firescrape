@@ -118,6 +118,17 @@ writeFileSync(base + ".json", JSON.stringify({ result: { language: "en" },
     expect(isTranscribed(base)).toBe(true);
   });
 
+  it("refuses playlists disguised as media", async () => {
+    const evil = join(dir, "evil.mp3");
+    await writeFile(evil, "ffconcat version 1.0\nfile /etc/hostname\n");
+    await expect(
+      transcribeFile(evil, join(dir, "evil"), {
+        ...settings,
+        whisper: { bin: fakeWhisper, model: "unused" },
+      }),
+    ).rejects.toThrow(/whitelist/);
+  });
+
   it("reports a missing whisper binary", async () => {
     await expect(
       transcribeFile(join(dir, "tone.mp3"), join(dir, "x"), {
