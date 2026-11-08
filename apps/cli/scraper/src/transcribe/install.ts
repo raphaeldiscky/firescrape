@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, createWriteStream, existsSync } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { cpus } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { runProcess } from "../lib/run-process.js";
+import { findOnPath } from "../lib/which.js";
 import { DEFAULT_MODEL, WHISPER_VERSION, whisperHome, type WhisperPaths } from "./setup.js";
 
 export const WHISPER_REPO = "https://github.com/ggml-org/whisper.cpp.git";
@@ -35,20 +36,6 @@ export interface InstallCommand {
   label: string;
   command: string;
   args: string[];
-}
-
-function findOnPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
-  for (const dir of (env["PATH"] ?? "").split(delimiter)) {
-    if (!dir) continue;
-    const candidate = join(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // Not in this directory.
-    }
-  }
-  return undefined;
 }
 
 function cudaArch(): string | undefined {
