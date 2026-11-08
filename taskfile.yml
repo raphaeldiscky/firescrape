@@ -148,7 +148,7 @@ tasks:
     desc: Bundle scraper with tsdown (optional — tsx is the default runner)
     dir: apps/cli/scraper
     cmds:
-      - pnpm exec tsdown
+      - pnpm run build
 
   scrape:
     desc: 'Scrape one URL → markdown on stdout. Usage: task scrape -- https://example.com'

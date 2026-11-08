@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "scraper": "tsx src/cli.ts",
-    "build": "tsdown",
+    "build": "tsdown --config-loader tsx",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
     "format": "oxfmt --write .",
