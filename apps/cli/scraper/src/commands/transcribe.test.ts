@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -153,6 +154,25 @@ describe("runTranscribe", () => {
     );
     expect(await readFile(join(dir, "talks/nested/two.txt"), "utf8")).toContain("two.wav");
     expect(await readFile(join(dir, "single.srt"), "utf8")).toContain("single.m4a");
+  });
+
+  it("ignores manifest media paths that point outside the run", async () => {
+    const run = join(dir, "run");
+    await mkdir(run);
+    await writeFile(join(dir, "outside.mp3"), "audio");
+    const crafted = manifest();
+    crafted.assets = [
+      { ...crafted.assets[0]!, path: "../outside.mp3" },
+      { ...crafted.assets[0]!, path: join(dir, "outside.mp3") },
+    ];
+    await writeFile(join(run, "manifest.json"), JSON.stringify(crafted));
+
+    const seen: string[] = [];
+    await expect(
+      runTranscribe({ inputs: [run], workers: 1, settings, runner: fakeRunner(seen) }),
+    ).rejects.toThrow("No audio or video files found to transcribe");
+    expect(seen).toEqual([]);
+    expect(existsSync(join(dir, "outside.txt"))).toBe(false);
   });
 
   it("fails clearly when there is nothing to transcribe", async () => {
