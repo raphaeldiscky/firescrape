@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { parse } from "yaml";
 import { checkoutRoot, createRun } from "../archive/paths.js";
 import type { Manifest } from "../archive/storage.js";
 import { loadConfig } from "../config.js";
@@ -371,17 +372,19 @@ describe("site archives", () => {
     }
   });
 
-  it("exposes two Task shortcuts that force their respective engines and preserve URL arguments", async () => {
+  it("exposes two Task shortcuts that force their respective engines and pass URL arguments through", async () => {
+    // Read the Taskfile instead of running the task binary, so tests need no Task install.
+    const taskfile = parse(await readFile(join(checkoutRoot(), "taskfile.yml"), "utf8")) as {
+      tasks: Record<string, { dir?: string; env?: Record<string, string>; cmds?: string[] }>;
+    };
     for (const name of ["api", "cdp"]) {
-      const { stdout, stderr } = await promisify(execFile)(
-        "task",
-        ["--dry", `scrape:all:${name}`, "--", "https://example.com/?a=1&b=2", "--limit", "2"],
-        { cwd: checkoutRoot() },
-      );
-      const output = stdout + stderr;
-      expect(output).toContain(`--engine ${name}`);
-      expect(output).toContain("--limit 2");
-      expect(output).toContain("https://example.com/?a=1&b=2");
+      const shortcut = taskfile.tasks[`scrape:all:${name}`];
+      expect(shortcut?.dir).toBe("apps/cli/scraper");
+      expect(shortcut?.env?.["SCRAPER_INVOKE_CWD"]).toBe("{{.USER_WORKING_DIR}}");
+      // The forced --engine comes after the user's arguments, so it always wins.
+      expect(shortcut?.cmds).toEqual([
+        `pnpm exec tsx src/cli.ts archive {{.CLI_ARGS}} --engine ${name}`,
+      ]);
     }
   });
 });
