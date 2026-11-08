@@ -7,6 +7,9 @@ export interface RunSummary {
   dir: string;
   sourceUrl: string;
   startedAt: string;
+  status: Manifest["status"];
+  /** Pages saved. */
+  pages: number;
   /** Downloaded audio and video files. */
   media: number;
   transcribed: number;
@@ -18,8 +21,15 @@ async function subdirs(dir: string): Promise<string[]> {
   return entries.filter((e) => e.isDirectory()).map((e) => join(dir, e.name));
 }
 
-/** Archive runs under `data/<host>/<run>/` that have audio or video, newest first. */
-export async function listRuns(dataDir: string, limit = 10): Promise<RunSummary[]> {
+/**
+ * Archive runs under `data/<host>/<run>/`, newest first. By default only runs
+ * with audio or video (what the transcribe picker needs).
+ */
+export async function listRuns(
+  dataDir: string,
+  limit = 10,
+  { mediaOnly = true }: { mediaOnly?: boolean } = {},
+): Promise<RunSummary[]> {
   const hosts = await subdirs(dataDir);
   const runDirs = (await Promise.all(hosts.map((host) => subdirs(host)))).flat();
   const runs = await Promise.all(
@@ -36,6 +46,8 @@ export async function listRuns(dataDir: string, limit = 10): Promise<RunSummary[
           dir,
           sourceUrl: manifest.sourceUrl,
           startedAt: manifest.startedAt,
+          status: manifest.status,
+          pages: (manifest.pages ?? []).filter((p) => p.status === "saved").length,
           media,
           transcribed,
         };
@@ -45,7 +57,7 @@ export async function listRuns(dataDir: string, limit = 10): Promise<RunSummary[
     }),
   );
   return runs
-    .filter((r): r is RunSummary => r !== undefined && r.media > 0)
+    .filter((r): r is RunSummary => r !== undefined && (!mediaOnly || r.media > 0))
     .toSorted((a, b) => b.startedAt.localeCompare(a.startedAt))
     .slice(0, limit);
 }

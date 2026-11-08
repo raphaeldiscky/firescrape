@@ -194,6 +194,8 @@ describe("Wizard", () => {
             dir: "/data/example.com/run-1",
             sourceUrl: "https://example.com/",
             startedAt: "2026-11-08T10:00:00.000Z",
+            status: "completed",
+            pages: 3,
             media: 4,
             transcribed: 1,
           },

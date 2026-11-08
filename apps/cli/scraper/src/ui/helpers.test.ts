@@ -93,4 +93,14 @@ describe("listRuns", () => {
     ]);
     expect(await listRuns(join(dir, "missing"))).toEqual([]);
   });
+
+  it("can include runs without media", async () => {
+    await run("a.test", "old", "2026-11-01T00:00:00Z", ["audio"]);
+    await run("c.test", "images", "2026-11-08T00:00:00Z", ["image"]);
+    const runs = await listRuns(dir, 10, { mediaOnly: false });
+    expect(runs.map((r) => [r.dir, r.media])).toEqual([
+      [join(dir, "c.test/images"), 0],
+      [join(dir, "a.test/old"), 1],
+    ]);
+  });
 });
