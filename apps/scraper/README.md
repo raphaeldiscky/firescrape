@@ -26,6 +26,9 @@ task scrape:all:api -- "https://example.com"
 
 # Override the defaults
 task scrape:all:cdp -- "https://example.com" --limit 25 --max-media-mb 20 --delay-ms 2000
+
+# Audio/video that loads only after a Play click (CDP only)
+task scrape:all:cdp -- "https://example.com/listening-test" --play-media
 task scrape:all:api -- "https://example.com" --out ./my-archives/
 ```
 
@@ -45,6 +48,7 @@ data/<hostname>/<UTC-timestamp>-<unique-id>/
 │   └── screenshot.png       # CDP only, when capture succeeds
 └── assets/
     ├── images/
+    ├── audio/
     └── videos/
 ```
 
@@ -54,7 +58,9 @@ Defaults are **100 attempted pages**, **100 MB per media file** (decimal MB), an
 
 The archive follows accessible same-origin links, including navigation links, and skips obvious logout/action URLs and non-page files. An initial redirect establishes the origin; later redirects outside it are recorded without expanding them. It does not execute configured profile `actions`, submit forms, discover unlinked pages, automatically scroll, or solve CAPTCHAs. Archive formats and `onlyMainContent: false` are fixed so text-format profile settings cannot hide media or navigation.
 
-Images include lazy-loading/responsive sources and posters. Videos must expose direct file URLs; streaming manifests and embedded players remain references. Downloads use destination-scoped browser cookies in CDP mode, but the media transfer uses Node HTTP rather than Chrome's network stack and can still be blocked. CDP does not guarantee undetectable automation.
+Images include lazy-loading/responsive sources and posters. Audio comes from `<audio>`/`<source>` elements, audio file links and `og:audio`. In CDP mode, audio and video files the page loads while it is open are added too, even when their URLs never appear in the HTML. Videos and audio must expose direct file URLs; streaming manifests and embedded players remain references.
+
+Some pages request their media only after a Play click. `--play-media` (CDP only) clicks up to three visible controls named like Play/Listen (or with a "play" `aria-label`), waits up to 10 seconds for media requests, then pauses playback before capturing. Clicking is a real interaction: it can start a timed test or trigger other site actions, and audio may be heard briefly. Pages without a matching control are saved with a warning. Downloads use destination-scoped browser cookies in CDP mode, but the media transfer uses Node HTTP rather than Chrome's network stack and can still be blocked. CDP does not guarantee undetectable automation.
 
 Every CDP scrape waits for page network activity to be idle for 500 ms before capturing content, then requests below-fold lazy images and waits for images/fonts to finish. Screenshots disable animations. Readiness has a 30-second default budget (or the profile `timeout`); polling/streaming pages that never settle are captured with a warning and `metadata.captureReady: false`. This applies to `scrape`, `batch`, and `archive`, and only waits on the scraper's page, not unrelated browser tabs. The existing profile `waitFor` adds a minimum delay before this readiness check. Network inactivity cannot guarantee that every app has finished rendering; use additional `waitFor` for delayed client-side UI.
 
@@ -62,13 +68,13 @@ Successful pages survive individual failures. `manifest.json` and `index.md` rec
 
 ## Commands
 
-| Command           | Purpose                                                      |
-| ----------------- | ------------------------------------------------------------ |
-| `scrape <url>`    | Single URL → one document                                    |
-| `batch [urls...]` | Many URLs (args, `--file`, or `--stdin`) → many documents    |
-| `crawl <url>`     | Start a crawl, poll `/v1/crawl/:id`, stream results          |
-| `archive <url>`   | Archive linked pages and discovered image/direct-video files |
-| `map <url>`       | List URLs reachable on a site (no scraping)                  |
+| Command           | Purpose                                                     |
+| ----------------- | ----------------------------------------------------------- |
+| `scrape <url>`    | Single URL → one document                                   |
+| `batch [urls...]` | Many URLs (args, `--file`, or `--stdin`) → many documents   |
+| `crawl <url>`     | Start a crawl, poll `/v1/crawl/:id`, stream results         |
+| `archive <url>`   | Archive linked pages and discovered image/audio/video files |
+| `map <url>`       | List URLs reachable on a site (no scraping)                 |
 
 ### Global options
 
