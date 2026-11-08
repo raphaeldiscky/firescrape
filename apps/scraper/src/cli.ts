@@ -55,11 +55,12 @@ program
 
 program
   .command("archive <url>")
-  .description("Archive linked site pages and download images/direct videos")
+  .description("Archive linked site pages and download images, audio and direct videos")
   .option("-o, --out <path>", "archive root directory (default: checkout data/)")
   .option("--limit <n>", "maximum attempted pages", Number, 100)
   .option("--max-media-mb <n>", "maximum bytes per media file in decimal MB", Number, 100)
   .option("--delay-ms <n>", "minimum delay between page navigations", Number, 1000)
+  .option("--play-media", "CDP only: click play controls so on-demand audio/video loads", false)
   .action(async (url: string, _opts: Record<string, unknown>, cmd: Command) => {
     const g = program.opts();
     const local = cmd.opts();
@@ -82,6 +83,7 @@ program
         limit: local["limit"] as number,
         maxMediaMb: local["maxMediaMb"] as number,
         delayMs: local["delayMs"] as number,
+        playMedia: Boolean(local["playMedia"]),
         signal: controller.signal,
       });
       if (manifest.status === "partial") process.exitCode = 1;

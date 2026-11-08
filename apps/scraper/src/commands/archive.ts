@@ -1,7 +1,13 @@
 /* eslint-disable no-await-in-loop -- crawling, rate limits and per-run deduplication are sequential. */
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { discover, httpUrl, isPageUrl } from "../archive/discovery.js";
+import {
+  discover,
+  httpUrl,
+  isPageUrl,
+  mergeCaptured,
+  type CapturedMedia,
+} from "../archive/discovery.js";
 import { downloadMedia, retryDelay, type MediaResult } from "../archive/download.js";
 import { MediaProgress } from "../archive/media-progress.js";
 import { ensureApiReady } from "../archive/local-api.js";
@@ -22,6 +28,8 @@ export interface ArchiveOptions {
   limit: number;
   maxMediaMb: number;
   delayMs: number;
+  /** CDP only: click play controls so on-demand audio/video is requested. */
+  playMedia?: boolean;
   signal?: AbortSignal;
 }
 
@@ -64,8 +72,10 @@ export async function runArchive(
   )
     throw new Error("Invalid archive limits");
   if (opts.out === "-") throw new Error("Archive output must be a directory, not stdout");
+  if (opts.playMedia && opts.engineName !== "cdp")
+    throw new Error("--play-media requires the CDP engine");
 
-  const pool = createEnginePool(opts.config, opts.cdpUrlOverride);
+  const pool = createEnginePool(opts.config, opts.cdpUrlOverride, { playMedia: opts.playMedia });
   try {
     const engine = pool.get(opts.engineName);
     if (opts.engineName === "api") await ensureApiReady(opts.config.apiUrl, opts.signal);
@@ -78,7 +88,12 @@ export async function runArchive(
       engine: opts.engineName,
       startedAt: new Date().toISOString(),
       status: "running",
-      settings: { limit: opts.limit, maxMediaMb: opts.maxMediaMb, delayMs: opts.delayMs },
+      settings: {
+        limit: opts.limit,
+        maxMediaMb: opts.maxMediaMb,
+        delayMs: opts.delayMs,
+        playMedia: opts.playMedia ?? false,
+      },
       limitReached: false,
       pages: [],
       assets: [],
@@ -132,6 +147,12 @@ export async function runArchive(
           } else {
             finalUrls.add(finalUrl);
             const discovered = discover(data.rawHtml ?? data.html ?? "", finalUrl);
+            const pageMedia = mergeCaptured(
+              discovered.media,
+              Array.isArray(data["mediaRequests"])
+                ? (data["mediaRequests"] as CapturedMedia[])
+                : undefined,
+            );
             links = [
               ...new Set([
                 ...discovered.links,
@@ -147,15 +168,13 @@ export async function runArchive(
               }
             }
             const headers = mediaHeaders(engine, req.headers, url, finalUrl);
-            process.stderr.write(
-              `  captured page; ${discovered.media.length} media items to process\n`,
-            );
+            process.stderr.write(`  captured page; ${pageMedia.length} media items to process\n`);
             const progress = new MediaProgress();
             try {
-              for (const [index, ref] of discovered.media.entries()) {
+              for (const [index, ref] of pageMedia.entries()) {
                 let asset = assets.get(ref.url);
                 const reused = Boolean(asset && !(asset.kind === "embed" && ref.kind !== "embed"));
-                progress.start(index + 1, discovered.media.length, ref.url, reused);
+                progress.start(index + 1, pageMedia.length, ref.url, reused);
                 if (!asset || !reused) {
                   asset = await downloadMedia(ref, {
                     root,

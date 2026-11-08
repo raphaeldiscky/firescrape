@@ -34,6 +34,11 @@ beforeAll(async () => {
       res.end("video");
       return;
     }
+    if (req.url === "/listen.mp3" || req.url === "/track?id=7") {
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.end("audio");
+      return;
+    }
     if (req.url === "/missing.png") {
       res.writeHead(404);
       res.end();
@@ -63,7 +68,8 @@ beforeAll(async () => {
       <a href="/logout">Logout</a><a href="https://outside.example/">External</a></nav>
       <main>Fixture ${path}</main><img src="${base}/shared.png">
       <video src="${base}/movie.mp4"></video><iframe src="https://player.example/embed"></iframe>
-      ${path === "/partial" ? '<a href="/blocked">Blocked</a><img src="/missing.png">' : ""}</body></html>`;
+      ${path === "/partial" ? '<a href="/blocked">Blocked</a><img src="/missing.png">' : ""}
+      ${path === "/listening" ? `<audio src="${base}/listen.mp3"></audio>` : ""}</body></html>`;
     res.setHeader("Content-Type", "application/json");
     res.end(
       JSON.stringify({
@@ -73,6 +79,9 @@ beforeAll(async () => {
           html,
           rawHtml: html,
           links: [],
+          ...(path === "/listening"
+            ? { mediaRequests: [{ url: `${base}/track?id=7`, contentType: "audio/mpeg" }] }
+            : {}),
           metadata: {
             url: payload.url,
             sourceURL: payload.url,
@@ -148,6 +157,20 @@ describe("site archives", () => {
     expect(savedManifest).toEqual(manifest);
   });
 
+  it("saves audio from markup and from media the engine saw loading", async () => {
+    const { root, manifest } = await runArchive({ ...(await options("/listening")), limit: 1 });
+    const audio = manifest.assets.filter((a) => a.kind === "audio");
+    expect(audio.map((a) => [a.url, a.status])).toEqual([
+      [`${base}/listen.mp3`, "downloaded"],
+      [`${base}/track?id=7`, "downloaded"],
+    ]);
+    for (const asset of audio) expect(asset.path).toMatch(/^assets\/audio\/.+\.mp3$/);
+    const saved = await Promise.all(audio.map((a) => readFile(join(root, a.path!), "utf8")));
+    expect(saved).toEqual(["audio", "audio"]);
+    expect(manifest.settings.playMedia).toBe(false);
+    await verifyIndex(root);
+  });
+
   it("shows media counts, completed downloads and reused assets on stderr", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
@@ -209,6 +232,7 @@ describe("site archives", () => {
       { maxMediaMb: Infinity },
       { out: "-" },
       { url: "file:///etc/passwd" },
+      { playMedia: true },
     ]) {
       await expect(runArchive({ ...(await options()), ...changes })).rejects.toThrow();
     }

@@ -1,7 +1,7 @@
 import { Client } from "../client.js";
 import type { Config } from "../config.js";
 import { ApiEngine } from "./api.js";
-import { CdpEngine } from "./cdp.js";
+import { CdpEngine, type CdpEngineOptions } from "./cdp.js";
 import type { Engine, EngineName } from "./types.js";
 
 export interface EnginePool {
@@ -9,7 +9,11 @@ export interface EnginePool {
   closeAll(): Promise<void>;
 }
 
-export function createEnginePool(config: Config, cdpUrlOverride: string | undefined): EnginePool {
+export function createEnginePool(
+  config: Config,
+  cdpUrlOverride: string | undefined,
+  cdpOptions: CdpEngineOptions = {},
+): EnginePool {
   const cache = new Map<EngineName, Engine>();
   const cdpUrl = cdpUrlOverride ?? config.cdp?.url ?? "http://localhost:9222";
 
@@ -19,7 +23,7 @@ export function createEnginePool(config: Config, cdpUrlOverride: string | undefi
       if (existing) return existing;
       const engine: Engine =
         name === "cdp"
-          ? new CdpEngine(cdpUrl)
+          ? new CdpEngine(cdpUrl, cdpOptions)
           : new ApiEngine(new Client({ apiUrl: config.apiUrl, retries: config.retries }));
       cache.set(name, engine);
       return engine;
