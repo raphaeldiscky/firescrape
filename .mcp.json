@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "firescrape": {
+      "command": "pnpm",
+      "args": ["--silent", "--dir", "apps/cli/scraper", "exec", "tsx", "src/cli.ts", "mcp"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.83", "--cdp-endpoint", "http://localhost:9222"]
+    },
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp@3.24.0"],
+      "env": { "FIRECRAWL_API_URL": "http://localhost:3002" }
+    }
+  }
+}

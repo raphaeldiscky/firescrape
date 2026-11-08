@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { cpus } from "node:os";
-import { basename, extname, join, relative, resolve } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { withoutExtension } from "../archive/paths.js";
 import { saveManifest, type Manifest, type TranscriptEntry } from "../archive/storage.js";
 import {
@@ -82,11 +82,22 @@ async function mediaFiles(dir: string): Promise<string[]> {
     .toSorted();
 }
 
+/** Manifest paths come from a file on disk; never read or write outside the run. */
+function insideRoot(root: string, path: string): boolean {
+  if (isAbsolute(path)) return false;
+  const rel = relative(resolve(root), resolve(root, path));
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
 async function archivePlan(root: string): Promise<ArchivePlan> {
   const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8")) as Manifest;
   const jobs = manifest.assets
     .filter(
-      (a) => a.status === "downloaded" && a.path && (a.kind === "audio" || a.kind === "video"),
+      (a) =>
+        a.status === "downloaded" &&
+        a.path &&
+        (a.kind === "audio" || a.kind === "video") &&
+        insideRoot(root, a.path),
     )
     .map((a) => {
       const stem = basename(a.path!, extname(a.path!));

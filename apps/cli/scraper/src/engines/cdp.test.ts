@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { connect } = vi.hoisted(() => ({ connect: vi.fn() }));
 vi.mock("playwright", () => ({ chromium: { connectOverCDP: connect } }));
-import { CdpEngine } from "./cdp.js";
+import { CdpEngine, mediaTypeFromUrl } from "./cdp.js";
 
 function fixture() {
   const dom = new JSDOM(
@@ -42,13 +42,14 @@ function fixture() {
       return Buffer.from("png");
     }),
     url: () => "https://example.com/",
+    title: async () => dom.window.document.title,
     isClosed: () => closed,
     close: vi.fn(async () => {
       closed = true;
     }),
   };
   const cookies = vi.fn().mockResolvedValue([{ name: "session", value: "secret" }]);
-  const context = { newPage: vi.fn().mockResolvedValue(page), cookies };
+  const context = { newPage: vi.fn().mockResolvedValue(page), cookies, pages: () => [page] };
   const browser = { contexts: () => [context], isConnected: () => true, close: vi.fn() };
   connect.mockResolvedValue(browser);
   const respond = (url: string, contentType: string, resourceType = "media"): void =>
@@ -229,5 +230,47 @@ describe("CDP capture", () => {
     await expect(new CdpEngine("http://localhost:9222").prepare()).rejects.toThrow(
       /Launch Chrome first/,
     );
+  });
+
+  it("captures an open tab without reloading it or changing its DOM", async () => {
+    const { page, context, dom } = fixture();
+    dom.window.eval(`performance.getEntriesByType = () => [
+      { name: "https://cdn.example.com/part1.mp3" },
+      { name: "https://example.com/app.js" },
+    ]`);
+    const engine = new CdpEngine("http://localhost:9222");
+    expect(await engine.openTabs()).toEqual([
+      { url: "https://example.com/", title: "Original title" },
+    ]);
+    const data = await engine.captureOpenTab({ formats: ["markdown", "html", "rawHtml"] });
+    expect(page.goto).not.toHaveBeenCalled();
+    expect(context.newPage).not.toHaveBeenCalled();
+    expect(page.close).not.toHaveBeenCalled();
+    expect(data.metadata).toMatchObject({ url: "https://example.com/", title: "Original title" });
+    expect(data.html).not.toContain("<nav>");
+    expect(data.markdown).toContain("Hello");
+    // The agent's tab keeps everything that cleaning removed from the copy.
+    expect(dom.window.document.querySelector("nav")).not.toBeNull();
+    expect(dom.window.document.querySelector("video")).not.toBeNull();
+    expect(data["mediaRequests"]).toEqual([
+      { url: "https://cdn.example.com/part1.mp3", contentType: "audio/mpeg" },
+    ]);
+    dom.window.close();
+  });
+
+  it("asks which tab to capture when the url does not match one", async () => {
+    const { dom } = fixture();
+    const engine = new CdpEngine("http://localhost:9222");
+    await expect(engine.captureOpenTab({ url: "https://other.test/" })).rejects.toThrow(
+      "No open tab at https://other.test/; open tabs: https://example.com/",
+    );
+    dom.window.close();
+  });
+
+  it("guesses media types from file extensions", () => {
+    expect(mediaTypeFromUrl("https://x.test/a/b.MP3?sig=1")).toBe("audio/mpeg");
+    expect(mediaTypeFromUrl("https://x.test/v.webm")).toBe("video/webm");
+    expect(mediaTypeFromUrl("https://x.test/page.html")).toBeUndefined();
+    expect(mediaTypeFromUrl("not a url")).toBeUndefined();
   });
 });

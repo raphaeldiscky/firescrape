@@ -67,3 +67,5 @@ apps/api/src/lib/scrape-interact/*.md
 vitest.out
 
 tmp/
+# Playwright MCP page snapshots and console logs
+.playwright-mcp/
