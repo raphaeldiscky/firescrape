@@ -35,6 +35,14 @@ const ConfigSchema = z.object({
     .default({ url: "http://localhost:9222" }),
   profiles: z.record(z.string(), ProfileSchema).default({}),
   domains: z.record(z.string(), ProfileSchema).default({}),
+  transcribe: z
+    .object({
+      /** whisper.cpp `whisper-cli` binary; defaults to the in-app install location. */
+      whisperBin: z.string().optional(),
+      /** ggml model file; defaults to large-v3-turbo q5_0 in the install location. */
+      model: z.string().optional(),
+    })
+    .optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
