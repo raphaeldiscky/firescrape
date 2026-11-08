@@ -53,6 +53,11 @@ function transcribeFlags(cmd: Command): Command {
     .option("--cpu", "transcribe on the CPU instead of the GPU", false);
 }
 
+/** The Ink dashboard needs a terminal on both streams; `--no-ui` opts out. */
+function wantsDashboard(local: Record<string, unknown>): boolean {
+  return local["ui"] !== false && Boolean(process.stdout.isTTY && process.stderr.isTTY);
+}
+
 /** Runs `fn` with a signal that Ctrl+C (or SIGTERM) aborts. */
 async function withAbort<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
@@ -110,13 +115,20 @@ transcribeFlags(
     .option("--delay-ms <n>", "minimum delay between page navigations", Number, 1000)
     .option("--play-media", "CDP only: click play controls so on-demand audio/video loads", false)
     .option("--media <kinds>", "media kinds to download: image,video,audio", parseMediaKinds)
-    .option("--transcribe", "transcribe downloaded audio and video with whisper.cpp", false),
+    .option("--transcribe", "transcribe downloaded audio and video with whisper.cpp", false)
+    .option("--no-ui", "plain progress lines instead of the live dashboard"),
 ).action(async (url: string, _opts: Record<string, unknown>, cmd: Command) => {
   const g = program.opts();
   const local = cmd.opts();
   const config = await loadConfig(resolveUserPath(g["config"] as string));
   if (g["apiUrl"]) config.apiUrl = g["apiUrl"] as string;
   const choices = transcribeChoices(local);
+  const dashboard = wantsDashboard(local)
+    ? (await import("./ui/app.js")).startDashboard(
+        `Archiving ${url}`,
+        local["transcribe"] ? choices.workers : 0,
+      )
+    : undefined;
   const { manifest } = await withAbort((signal) =>
     runArchive({
       url,
@@ -133,9 +145,10 @@ transcribeFlags(
       transcribe: local["transcribe"]
         ? { workers: choices.workers, settings: transcribeSettings(config, choices) }
         : undefined,
+      ...(dashboard ? { reporter: dashboard.reporter } : {}),
       signal,
     }),
-  );
+  ).finally(() => dashboard?.stop());
   if (manifest.status === "partial") process.exitCode = 1;
   if (manifest.status === "interrupted") process.exitCode = 130;
 });
@@ -145,12 +158,17 @@ transcribeFlags(
     .command("transcribe <paths...>")
     .description(
       "Transcribe archive runs, media files or folders to timestamped SRT, VTT, JSON and TXT",
-    ),
+    )
+    .option("--no-ui", "plain progress lines instead of the live dashboard"),
 ).action(async (paths: string[], _opts: Record<string, unknown>, cmd: Command) => {
   const g = program.opts();
   const config = await loadConfig(resolveUserPath(g["config"] as string));
-  const choices = transcribeChoices(cmd.opts());
-  const reporter = new TextReporter();
+  const local = cmd.opts();
+  const choices = transcribeChoices(local);
+  const dashboard = wantsDashboard(local)
+    ? (await import("./ui/app.js")).startDashboard("Transcribing", choices.workers)
+    : undefined;
+  const reporter = dashboard?.reporter ?? new TextReporter();
   let interrupted = false;
   const results = await withAbort((signal) => {
     signal.addEventListener("abort", () => (interrupted = true));
@@ -161,7 +179,7 @@ transcribeFlags(
       onEvent: (event) => reporter.transcription(event),
       signal,
     });
-  });
+  }).finally(() => dashboard?.stop());
   const count = (status: string): number => results.filter((r) => r.status === status).length;
   process.stderr.write(
     `Transcribed ${count("transcribed")}, skipped ${count("skipped")}, failed ${count("failed")}\n`,
@@ -272,7 +290,17 @@ program
     });
   });
 
-program.parseAsync(process.argv).catch((err: unknown) => {
+async function main(): Promise<void> {
+  // No arguments on a terminal: choose everything in the interactive wizard.
+  if (process.argv.length <= 2 && process.stdin.isTTY && process.stdout.isTTY) {
+    const config = await loadConfig(resolveUserPath("scraper.config.yaml"));
+    process.exitCode = await (await import("./ui/app.js")).runUi(config);
+    return;
+  }
+  await program.parseAsync(process.argv);
+}
+
+main().catch((err: unknown) => {
   const msg = err instanceof Error ? err.message : String(err);
   process.stderr.write(`error: ${msg}\n`);
   process.exit(1);

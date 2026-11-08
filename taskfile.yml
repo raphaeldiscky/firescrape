@@ -101,6 +101,18 @@ tasks:
       - docker compose exec redis redis-cli
 
   # ----- Scraper CLI (run via tsx — no build needed) -----
+  # The one entry point: a terminal wizard picks every option (archive a site
+  # through Chrome/CDP or the API, transcribe media, set up whisper.cpp) and
+  # then shows a live dashboard. The flag-based tasks below remain for scripts.
+  scraper:
+    desc: Open the interactive scraper (archive a site, transcribe media, set up transcription)
+    dir: apps/cli/scraper
+    interactive: true
+    env:
+      SCRAPER_INVOKE_CWD: "{{.USER_WORKING_DIR}}"
+    cmds:
+      - pnpm exec tsx src/cli.ts
+
   scraper:install:
     desc: Install scraper deps
     dir: apps/cli/scraper
