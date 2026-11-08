@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import type { MediaResult, MediaTransferProgress } from "../archive/download.js";
 import type { ArchiveReporter } from "../archive/reporter.js";
 import type { Manifest } from "../archive/storage.js";
+import type { StepEvent } from "../lib/progress.js";
 import type { InstallEvent } from "../transcribe/install.js";
 import type { TranscribeEvent } from "../transcribe/queue.js";
 
@@ -34,7 +35,8 @@ export interface DashboardState {
   /** One slot per transcription worker; undefined while idle. */
   workers: Array<WorkerRow | undefined>;
   transcripts: { queued: number; transcribed: number; skipped: number; failed: number };
-  install?:
+  /** Preparation: building whisper.cpp or starting the local API. */
+  setup?:
     | {
         label: string;
         log: string[];
@@ -100,18 +102,18 @@ export class DashboardStore {
       this.error(`${event.job.label}: ${event.result.reason ?? "transcription failed"}`);
   }
 
-  install(event: InstallEvent): void {
+  setup(event: InstallEvent | StepEvent): void {
     this.update((s) => {
-      const install = s.install ?? { label: "", log: [] };
-      if (event.type === "step") return { ...s, install: { label: event.label, log: [] } };
+      const setup = s.setup ?? { label: "", log: [] };
+      if (event.type === "step") return { ...s, setup: { label: event.label, log: [] } };
       if (event.type === "log")
         return {
           ...s,
-          install: { ...install, log: [...install.log, event.line].slice(-LOG_LINES) },
+          setup: { ...setup, log: [...setup.log, event.line].slice(-LOG_LINES) },
         };
       return {
         ...s,
-        install: { ...install, download: { bytes: event.bytes, totalBytes: event.totalBytes } },
+        setup: { ...setup, download: { bytes: event.bytes, totalBytes: event.totalBytes } },
       };
     });
   }
@@ -124,6 +126,10 @@ export class DashboardStore {
 /** Feeds an archive run's events into the dashboard. */
 export class DashboardReporter implements ArchiveReporter {
   constructor(private readonly store: DashboardStore) {}
+
+  setup(event: StepEvent): void {
+    this.store.setup(event);
+  }
 
   started(root: string): void {
     this.store.update((s) => ({ ...s, root }));
@@ -258,20 +264,20 @@ export function Dashboard({ store }: { store: DashboardStore }) {
         <Text bold>{s.title}</Text>
       </Box>
 
-      {s.install && (
+      {s.setup && (
         <Box flexDirection="column" marginBottom={1}>
           <Row label="Setup">
-            <Text>{s.install.label}</Text>
+            <Text>{s.setup.label}</Text>
           </Row>
-          {s.install.download && (
+          {s.setup.download && (
             <Row label="Download">
               <Bar
-                value={percentOf(s.install.download.bytes, s.install.download.totalBytes) ?? 0}
-                text={`${formatBytes(s.install.download.bytes)}${s.install.download.totalBytes ? ` of ${formatBytes(s.install.download.totalBytes)}` : ""}`}
+                value={percentOf(s.setup.download.bytes, s.setup.download.totalBytes) ?? 0}
+                text={`${formatBytes(s.setup.download.bytes)}${s.setup.download.totalBytes ? ` of ${formatBytes(s.setup.download.totalBytes)}` : ""}`}
               />
             </Row>
           )}
-          {keyed(s.install.log, "log").map(({ key, item: line }) => (
+          {keyed(s.setup.log, "log").map(({ key, item: line }) => (
             <Text key={key} dimColor wrap="truncate-end">
               {"  "}
               {line}

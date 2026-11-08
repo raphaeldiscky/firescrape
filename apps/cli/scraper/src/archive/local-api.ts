@@ -1,6 +1,7 @@
 /* eslint-disable no-await-in-loop -- readiness checks wait for the previous attempt. */
-import { spawn } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
+import type { StepEvent } from "../lib/progress.js";
+import { runProcess } from "../lib/run-process.js";
 import { checkoutRoot } from "./paths.js";
 
 async function healthy(url: string, signal?: AbortSignal, starting = false): Promise<boolean> {
@@ -20,7 +21,16 @@ async function healthy(url: string, signal?: AbortSignal, starting = false): Pro
   }
 }
 
-export async function ensureApiReady(apiUrl: string, signal?: AbortSignal): Promise<void> {
+/**
+ * Make sure the API answers, starting the local Docker Compose stack when it
+ * is down. Progress and Compose output go to `onEvent`, never the terminal,
+ * so a live dashboard stays intact.
+ */
+export async function ensureApiReady(
+  apiUrl: string,
+  signal?: AbortSignal,
+  onEvent: (event: StepEvent) => void = () => {},
+): Promise<void> {
   if (await healthy(apiUrl, signal)) return;
   const url = new URL(apiUrl);
   if (
@@ -32,22 +42,17 @@ export async function ensureApiReady(apiUrl: string, signal?: AbortSignal): Prom
       `API unavailable at ${apiUrl}; automatic startup only supports a local HTTP API`,
     );
   }
-  process.stderr.write("Local API unavailable; starting Docker Compose…\n");
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn("docker", ["compose", "up", "--build", "-d"], {
-      cwd: checkoutRoot(),
-      stdio: "inherit",
-      env: { ...process.env, PORT: url.port || "80" },
-      ...(signal ? { signal } : {}),
-    });
-    child.once("error", reject);
-    child.once("exit", (code) =>
-      code === 0 ? resolve() : reject(new Error(`Docker Compose exited with ${code}`)),
-    );
+  onEvent({ type: "step", label: "Local API unavailable; starting Docker Compose…" });
+  await runProcess("docker", ["compose", "up", "--build", "-d"], {
+    cwd: checkoutRoot(),
+    env: { ...process.env, PORT: url.port || "80" },
+    signal,
+    onLine: (line) => onEvent({ type: "log", line }),
   });
-  process.stderr.write(
-    "Docker services started and will remain running. Stop them with task down.\n",
-  );
+  onEvent({
+    type: "step",
+    label: "Docker services started and will remain running. Stop them with task down.",
+  });
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (await healthy(apiUrl, signal, true)) return;

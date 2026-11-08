@@ -124,7 +124,8 @@ export async function runArchive(
   const pool = createEnginePool(opts.config, opts.cdpUrlOverride, { playMedia: opts.playMedia });
   try {
     const engine = pool.get(opts.engineName);
-    if (opts.engineName === "api") await ensureApiReady(opts.config.apiUrl, opts.signal);
+    if (opts.engineName === "api")
+      await ensureApiReady(opts.config.apiUrl, opts.signal, (event) => reporter.setup(event));
     await engine.prepare?.();
     opts.signal?.throwIfAborted();
     const root = await createRun(sourceUrl, opts.out);

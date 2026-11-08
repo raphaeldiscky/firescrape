@@ -80,16 +80,32 @@ describe("Dashboard", () => {
   it("shows the setup step, build log and model download", async () => {
     const store = new DashboardStore("Setting up transcription");
     const ui = render(<Dashboard store={store} />);
-    store.install({ type: "step", step: "build", label: "Building whisper-cli" });
-    store.install({ type: "log", line: "[ 50%] Building CUDA object" });
-    store.install({ type: "step", step: "model", label: "Downloading model" });
-    store.install({ type: "download", bytes: 300 * 1024 * 1024, totalBytes: 600 * 1024 * 1024 });
+    store.setup({ type: "step", step: "build", label: "Building whisper-cli" });
+    store.setup({ type: "log", line: "[ 50%] Building CUDA object" });
+    store.setup({ type: "step", step: "model", label: "Downloading model" });
+    store.setup({ type: "download", bytes: 300 * 1024 * 1024, totalBytes: 600 * 1024 * 1024 });
     await settle();
 
     const frame = ui.lastFrame() ?? "";
     expect(frame).toContain("Downloading model");
     expect(frame).toContain("300.0 MB of 600.0 MB");
     expect(frame).not.toContain("Building CUDA object"); // the log resets per step
+    ui.unmount();
+  });
+
+  it("shows Docker Compose output from API startup in the setup section", async () => {
+    const store = new DashboardStore("Archiving https://example.com/");
+    const reporter: ArchiveReporter = new DashboardReporter(store);
+    const ui = render(<Dashboard store={store} />);
+    reporter.setup({ type: "step", label: "Local API unavailable; starting Docker Compose…" });
+    reporter.setup({ type: "log", line: " Container firecrawl-redis-1  Started" });
+    reporter.setup({ type: "log", line: " Container firecrawl-api-1  Starting" });
+    await settle();
+
+    const frame = ui.lastFrame() ?? "";
+    expect(frame).toMatch(/Setup\s+Local API unavailable; starting Docker Compose…/);
+    expect(frame).toContain("Container firecrawl-redis-1  Started");
+    expect(frame).toContain("Container firecrawl-api-1  Starting");
     ui.unmount();
   });
 

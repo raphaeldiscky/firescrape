@@ -36,10 +36,10 @@ export async function executePlan(
 ): Promise<number> {
   try {
     if (plan.kind === "setup" || plan.setupFirst) {
-      const paths = await deps.install({ onEvent: (e) => store.install(e), signal });
+      const paths = await deps.install({ onEvent: (e) => store.setup(e), signal });
       store.update((s) => ({
         ...s,
-        install: { label: `whisper.cpp is ready (${whisperHome()})`, log: [] },
+        setup: { label: `whisper.cpp is ready (${whisperHome()})`, log: [] },
       }));
       if (plan.kind === "setup") {
         store.finish("completed", `whisper-cli ${paths.bin}, model ${paths.model}`);

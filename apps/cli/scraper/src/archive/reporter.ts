@@ -1,3 +1,4 @@
+import type { StepEvent } from "../lib/progress.js";
 import type { TranscribeEvent } from "../transcribe/queue.js";
 import type { MediaResult, MediaTransferProgress } from "./download.js";
 import { MediaProgress } from "./media-progress.js";
@@ -5,6 +6,8 @@ import type { Manifest } from "./storage.js";
 
 /** Everything an archive run reports while it works, for text or the Ink dashboard. */
 export interface ArchiveReporter {
+  /** Preparation before crawling, e.g. starting the local API with Docker Compose. */
+  setup(event: StepEvent): void;
   started(root: string): void;
   page(index: number, limit: number, url: string): void;
   pageCaptured(mediaCount: number): void;
@@ -29,6 +32,10 @@ export class TextReporter implements ArchiveReporter {
 
   constructor(private readonly stream: TextStream = process.stderr) {
     this.media = new MediaProgress(stream);
+  }
+
+  setup(event: StepEvent): void {
+    this.line(event.type === "step" ? event.label : `  ${event.line}`);
   }
 
   started(root: string): void {

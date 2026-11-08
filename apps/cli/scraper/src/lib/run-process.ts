@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 
 export interface RunProcessOptions {
   cwd?: string | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
   signal?: AbortSignal | undefined;
   /** Called for every stdout and stderr line, e.g. to parse progress. */
   onLine?: ((line: string, stream: "stdout" | "stderr") => void) | undefined;
@@ -32,6 +33,7 @@ export async function runProcess(
   opts.signal?.throwIfAborted();
   const child = spawn(command, args, {
     cwd: opts.cwd,
+    env: opts.env ?? process.env,
     stdio: ["ignore", "pipe", "pipe"],
     signal: opts.signal,
     killSignal: "SIGTERM",
