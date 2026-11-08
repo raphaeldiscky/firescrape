@@ -18,6 +18,21 @@ import { createEnginePool, type Engine, type EngineName } from "../engines/index
 import type { ScrapeResponseData } from "../formats/types.js";
 import { buildRequest } from "./scrape.js";
 
+export const MEDIA_KINDS = ["image", "video", "audio"] as const;
+export type MediaKind = (typeof MEDIA_KINDS)[number];
+
+/** Parse a comma-separated `--media` value such as "audio,video". */
+export function parseMediaKinds(value: string): MediaKind[] {
+  const kinds = value
+    .split(",")
+    .map((kind) => kind.trim().toLowerCase())
+    .filter(Boolean);
+  const invalid = kinds.filter((kind) => !(MEDIA_KINDS as readonly string[]).includes(kind));
+  if (invalid.length > 0 || kinds.length === 0)
+    throw new Error(`--media expects a list of ${MEDIA_KINDS.join(", ")}; got "${value}"`);
+  return [...new Set(kinds as MediaKind[])];
+}
+
 export interface ArchiveOptions {
   url: string;
   config: Config;
@@ -30,6 +45,8 @@ export interface ArchiveOptions {
   delayMs: number;
   /** CDP only: click play controls so on-demand audio/video is requested. */
   playMedia?: boolean;
+  /** Media kinds to download; defaults to all. Embedded players count as video. */
+  media?: MediaKind[] | undefined;
   signal?: AbortSignal;
 }
 
@@ -75,6 +92,10 @@ export async function runArchive(
   if (opts.playMedia && opts.engineName !== "cdp")
     throw new Error("--play-media requires the CDP engine");
 
+  const wanted = opts.media ?? [...MEDIA_KINDS];
+  const selected = (kind: MediaResult["kind"]): boolean =>
+    wanted.includes(kind === "embed" ? "video" : kind);
+
   const pool = createEnginePool(opts.config, opts.cdpUrlOverride, { playMedia: opts.playMedia });
   try {
     const engine = pool.get(opts.engineName);
@@ -93,6 +114,7 @@ export async function runArchive(
         maxMediaMb: opts.maxMediaMb,
         delayMs: opts.delayMs,
         playMedia: opts.playMedia ?? false,
+        media: wanted,
       },
       limitReached: false,
       pages: [],
@@ -175,7 +197,10 @@ export async function runArchive(
                 let asset = assets.get(ref.url);
                 const reused = Boolean(asset && !(asset.kind === "embed" && ref.kind !== "embed"));
                 progress.start(index + 1, pageMedia.length, ref.url, reused);
-                if (!asset || !reused) {
+                if (!selected(ref.kind)) {
+                  asset = { ...ref, status: "skipped", reason: "Media type not selected" };
+                  assets.set(ref.url, asset);
+                } else if (!asset || !reused) {
                   asset = await downloadMedia(ref, {
                     root,
                     maxBytes: opts.maxMediaMb * 1_000_000,

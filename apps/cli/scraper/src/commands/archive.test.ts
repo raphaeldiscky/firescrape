@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { checkoutRoot, createRun } from "../archive/paths.js";
 import type { Manifest } from "../archive/storage.js";
 import { loadConfig } from "../config.js";
-import { mediaHeaders, runArchive, type ArchiveOptions } from "./archive.js";
+import { mediaHeaders, parseMediaKinds, runArchive, type ArchiveOptions } from "./archive.js";
 
 let server: Server;
 let base = "";
@@ -169,6 +169,30 @@ describe("site archives", () => {
     expect(saved).toEqual(["audio", "audio"]);
     expect(manifest.settings.playMedia).toBe(false);
     await verifyIndex(root);
+  });
+
+  it("downloads only the selected media kinds", async () => {
+    const { manifest } = await runArchive({
+      ...(await options("/listening")),
+      limit: 1,
+      media: ["audio"],
+    });
+    const byKind = (kind: string) =>
+      manifest.assets.filter((a) => a.kind === kind).map((a) => [a.status, a.reason]);
+    expect(byKind("audio")).toEqual([
+      ["downloaded", undefined],
+      ["downloaded", undefined],
+    ]);
+    expect(byKind("image")).toEqual([["skipped", "Media type not selected"]]);
+    expect(byKind("video")).toEqual([["skipped", "Media type not selected"]]);
+    expect(byKind("embed")).toEqual([["skipped", "Media type not selected"]]);
+    expect(manifest.settings.media).toEqual(["audio"]);
+  });
+
+  it("rejects unknown --media kinds", () => {
+    expect(parseMediaKinds("audio, Video,audio")).toEqual(["audio", "video"]);
+    expect(() => parseMediaKinds("audio,pdf")).toThrow(/--media expects/);
+    expect(() => parseMediaKinds(" , ")).toThrow(/--media expects/);
   });
 
   it("shows media counts, completed downloads and reused assets on stderr", async () => {

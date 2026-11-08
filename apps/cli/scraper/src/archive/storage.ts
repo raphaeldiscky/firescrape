@@ -20,7 +20,13 @@ export interface Manifest {
   startedAt: string;
   finishedAt?: string;
   status: "running" | "completed" | "partial" | "interrupted";
-  settings: { limit: number; maxMediaMb: number; delayMs: number; playMedia: boolean };
+  settings: {
+    limit: number;
+    maxMediaMb: number;
+    delayMs: number;
+    playMedia: boolean;
+    media: Array<"image" | "video" | "audio">;
+  };
   limitReached: boolean;
   pages: PageResult[];
   assets: MediaResult[];

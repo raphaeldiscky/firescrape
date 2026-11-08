@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { loadConfig } from "./config.js";
-import { runArchive } from "./commands/archive.js";
+import { parseMediaKinds, runArchive, type MediaKind } from "./commands/archive.js";
 import { runBatch } from "./commands/batch.js";
 import { runCrawl } from "./commands/crawl.js";
 import { runMap } from "./commands/map.js";
@@ -61,6 +61,7 @@ program
   .option("--max-media-mb <n>", "maximum bytes per media file in decimal MB", Number, 100)
   .option("--delay-ms <n>", "minimum delay between page navigations", Number, 1000)
   .option("--play-media", "CDP only: click play controls so on-demand audio/video loads", false)
+  .option("--media <kinds>", "media kinds to download: image,video,audio", parseMediaKinds)
   .action(async (url: string, _opts: Record<string, unknown>, cmd: Command) => {
     const g = program.opts();
     const local = cmd.opts();
@@ -84,6 +85,7 @@ program
         maxMediaMb: local["maxMediaMb"] as number,
         delayMs: local["delayMs"] as number,
         playMedia: Boolean(local["playMedia"]),
+        media: local["media"] as MediaKind[] | undefined,
         signal: controller.signal,
       });
       if (manifest.status === "partial") process.exitCode = 1;
