@@ -18,7 +18,15 @@ function fixture() {
   );
   dom.window.eval("globalThis.__name = (fn) => fn");
   let closed = false;
+  const handlers: Record<string, (value: unknown) => void> = {};
+  const playButton = { isVisible: vi.fn().mockResolvedValue(true), click: vi.fn() };
+  const controls = { count: vi.fn().mockResolvedValue(0), nth: vi.fn(() => playButton) };
   const page = {
+    on: vi.fn((event: string, handler: (value: unknown) => void) => {
+      handlers[event] = handler;
+    }),
+    getByRole: vi.fn(() => ({ or: () => controls })),
+    locator: vi.fn(() => ({})),
     addInitScript: vi.fn(),
     setExtraHTTPHeaders: vi.fn(),
     goto: vi.fn().mockResolvedValue({ status: () => 200, headers: () => ({}) }),
@@ -43,7 +51,13 @@ function fixture() {
   const context = { newPage: vi.fn().mockResolvedValue(page), cookies };
   const browser = { contexts: () => [context], isConnected: () => true, close: vi.fn() };
   connect.mockResolvedValue(browser);
-  return { page, cookies, context, browser, dom };
+  const respond = (url: string, contentType: string, resourceType = "media"): void =>
+    handlers["response"]?.({
+      url: () => url,
+      headers: () => ({ "content-type": contentType }),
+      request: () => ({ resourceType: () => resourceType }),
+    });
+  return { page, cookies, context, browser, dom, controls, playButton, respond };
 }
 
 beforeEach(() => {
@@ -140,6 +154,74 @@ describe("CDP capture", () => {
     expect(data["warning"]).toContain("unsupported");
     expect(page.close).toHaveBeenCalledOnce();
     dom.window.close();
+  });
+
+  it("records audio and video the browser loads, ignoring other responses", async () => {
+    const { page, dom, respond } = fixture();
+    page.goto.mockImplementation(async () => {
+      respond("https://cdn.example.com/track?id=1", "audio/mpeg");
+      respond("https://cdn.example.com/clip", "video/mp4", "fetch");
+      respond("https://example.com/app.js", "text/javascript", "script");
+      respond("https://cdn.example.com/track?id=1", "audio/mpeg");
+      return { status: () => 200, headers: () => ({}) };
+    });
+    const data = await new CdpEngine("http://localhost:9222").scrape({
+      url: "https://example.com/",
+      formats: ["markdown"],
+    });
+    expect(data["mediaRequests"]).toEqual([
+      { url: "https://cdn.example.com/track?id=1", contentType: "audio/mpeg" },
+      { url: "https://cdn.example.com/clip", contentType: "video/mp4" },
+    ]);
+    expect(page.getByRole).not.toHaveBeenCalled();
+    dom.window.close();
+  });
+
+  it("clicks a play control when asked, waits for its media, then pauses playback", async () => {
+    const { page, dom, controls, playButton, respond } = fixture();
+    dom.window.document.body.insertAdjacentHTML("beforeend", "<audio></audio>");
+    const audio = dom.window.document.querySelector("audio")!;
+    const pause = vi.fn();
+    audio.pause = pause;
+    controls.count.mockResolvedValue(1);
+    playButton.click.mockImplementation(async () => {
+      setTimeout(() => respond("https://cdn.example.com/listening.mp3", "audio/mpeg"), 20);
+    });
+    const data = await new CdpEngine("http://localhost:9222", {
+      playMedia: true,
+      mediaSettleMs: 10,
+    }).scrape({ url: "https://example.com/", formats: ["markdown"] });
+    expect(playButton.click).toHaveBeenCalledOnce();
+    expect(page.getByRole).toHaveBeenCalledWith("button", { name: expect.any(RegExp) });
+    expect(data["mediaRequests"]).toEqual([
+      { url: "https://cdn.example.com/listening.mp3", contentType: "audio/mpeg" },
+    ]);
+    expect(pause).toHaveBeenCalledOnce();
+    expect(data["warning"]).toBeUndefined();
+    expect(data.metadata?.["captureReady"]).toBe(true);
+    dom.window.close();
+  });
+
+  it("keeps the page and warns when no play control or media appears", async () => {
+    const missing = fixture();
+    const none = await new CdpEngine("http://localhost:9222", { playMedia: true }).scrape({
+      url: "https://example.com/",
+      formats: ["markdown"],
+    });
+    expect(none.markdown).toContain("Hello");
+    expect(none["warning"]).toMatch(/no visible play control/);
+    expect(none.metadata?.["captureReady"]).toBe(true);
+    missing.dom.window.close();
+
+    const silent = fixture();
+    silent.controls.count.mockResolvedValue(1);
+    const quiet = await new CdpEngine("http://localhost:9222", {
+      playMedia: true,
+      mediaWaitMs: 20,
+    }).scrape({ url: "https://example.com/", formats: ["markdown"] });
+    expect(silent.playButton.click).toHaveBeenCalledOnce();
+    expect(quiet["warning"]).toMatch(/no audio or video was requested/);
+    silent.dom.window.close();
   });
 
   it("reports unavailable Chrome with launch instructions", async () => {
