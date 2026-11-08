@@ -189,6 +189,99 @@ describe("site archives", () => {
     expect(manifest.settings.media).toEqual(["audio"]);
   });
 
+  it("transcribes downloaded audio and video while the crawl continues", async () => {
+    pageRequests.length = 0;
+    const started: string[] = [];
+    const settings = {
+      whisper: { bin: "unused", model: "/models/ggml-test.bin" },
+      language: "auto",
+      threads: 1,
+      gpu: false,
+    };
+    const { root, manifest } = await runArchive({
+      ...(await options("/listening")),
+      limit: 2,
+      transcribe: {
+        workers: 2,
+        settings,
+        // Finishing only once a later page was crawled proves the crawl did not wait.
+        runner: async (input, outBase) => {
+          started.push(input);
+          await vi.waitFor(() => expect(pageRequests.length).toBeGreaterThanOrEqual(2), {
+            timeout: 5000,
+          });
+          return {
+            files: [".srt", ".vtt", ".json", ".txt"].map((ext) => outBase + ext),
+            language: "en",
+            durationSec: 3,
+            segments: 2,
+          };
+        },
+      },
+    });
+    expect(manifest.status).toBe("completed");
+    expect(started).toHaveLength(3);
+    expect(manifest.settings.transcribe).toEqual({
+      workers: 2,
+      language: "auto",
+      model: "ggml-test.bin",
+    });
+    const transcripts = manifest.transcripts ?? [];
+    expect(transcripts.map((t) => t.asset).toSorted()).toEqual(
+      [`${base}/listen.mp3`, `${base}/movie.mp4`, `${base}/track?id=7`].toSorted(),
+    );
+    for (const t of transcripts) {
+      expect(t.status).toBe("transcribed");
+      expect(t.segments).toBe(2);
+      expect(t.files?.[3]).toMatch(/^transcripts\/.+--[0-9a-f]+\.txt$/);
+    }
+    const index = await readFile(join(root, "index.md"), "utf8");
+    expect(index).toContain("## Transcripts");
+    expect(index).toMatch(/2 segments, 3s · \[SRT\]/);
+  });
+
+  it("marks the archive partial when a transcription fails", async () => {
+    const { manifest } = await runArchive({
+      ...(await options("/listening")),
+      limit: 1,
+      media: ["audio"],
+      transcribe: {
+        workers: 1,
+        settings: {
+          whisper: { bin: "unused", model: "unused" },
+          language: "en",
+          threads: 1,
+          gpu: false,
+        },
+        runner: async () => {
+          throw new Error("whisper-cli exited with 1");
+        },
+      },
+    });
+    expect(manifest.status).toBe("partial");
+    expect(manifest.transcripts?.map((t) => [t.status, t.reason])).toEqual([
+      ["failed", "whisper-cli exited with 1"],
+      ["failed", "whisper-cli exited with 1"],
+    ]);
+  });
+
+  it("refuses to transcribe when whisper is not installed", async () => {
+    await expect(
+      runArchive({
+        ...(await options("/listening")),
+        transcribe: {
+          workers: 1,
+          settings: {
+            whisper: { bin: "/nonexistent/whisper-cli", model: "/nonexistent/model.bin" },
+            language: "auto",
+            threads: 1,
+            gpu: true,
+          },
+        },
+      }),
+    ).rejects.toThrow(/Transcription is not set up/);
+  });
+
   it("rejects unknown --media kinds", () => {
     expect(parseMediaKinds("audio, Video,audio")).toEqual(["audio", "video"]);
     expect(() => parseMediaKinds("audio,pdf")).toThrow(/--media expects/);

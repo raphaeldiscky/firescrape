@@ -26,10 +26,27 @@ export interface Manifest {
     delayMs: number;
     playMedia: boolean;
     media: Array<"image" | "video" | "audio">;
+    transcribe?: { workers: number; language: string; model: string };
   };
   limitReached: boolean;
   pages: PageResult[];
   assets: MediaResult[];
+  /** Present when transcription was enabled. */
+  transcripts?: TranscriptEntry[];
+}
+
+export interface TranscriptEntry {
+  /** Source media URL. */
+  asset: string;
+  /** Downloaded media path, relative to the archive root. */
+  media: string;
+  status: "queued" | "transcribed" | "skipped" | "failed";
+  /** Transcript files relative to the archive root: .srt, .vtt, .json, .txt. */
+  files?: string[] | undefined;
+  language?: string | undefined;
+  durationSec?: number | undefined;
+  segments?: number | undefined;
+  reason?: string | undefined;
 }
 
 async function jsonFile(path: string, data: unknown): Promise<void> {
@@ -126,5 +143,23 @@ export async function saveManifest(root: string, manifest: Manifest): Promise<vo
         ? `- [${mdText(new URL(asset.url).pathname)}](${encodeURI(asset.path)}) — ${asset.bytes ?? 0} bytes`
         : `- ${mdText(asset.url)} — ${asset.status}: ${mdText(asset.reason ?? "")}`,
     );
+  if (manifest.transcripts) {
+    lines.push("", "## Transcripts", "");
+    for (const t of manifest.transcripts) {
+      const txt = t.files?.find((file) => file.endsWith(".txt"));
+      lines.push(
+        txt && t.status !== "failed"
+          ? `- [${mdText(t.media)}](${encodeURI(txt)}) — ${t.segments ?? "?"} segments, ${t.durationSec ?? "?"}s` +
+              (t.files ?? [])
+                .filter((file) => !file.endsWith(".txt"))
+                .map(
+                  (file) =>
+                    ` · [${file.slice(file.lastIndexOf(".") + 1).toUpperCase()}](${encodeURI(file)})`,
+                )
+                .join("")
+          : `- ${mdText(t.media)} — ${t.status}${t.reason ? `: ${mdText(t.reason)}` : ""}`,
+      );
+    }
+  }
   await writeFile(join(root, "index.md"), `${lines.join("\n")}\n`);
 }
