@@ -66,6 +66,33 @@ export interface CdpEngineOptions {
   mediaSettleMs?: number | undefined;
 }
 
+const MEDIA_EXTENSIONS: Record<string, string> = {
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
+  opus: "audio/opus",
+  flac: "audio/flac",
+  weba: "audio/webm",
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  ogv: "video/ogg",
+};
+
+/** A media type guessed from the URL's file extension, for requests seen without headers. */
+export function mediaTypeFromUrl(url: string): string | undefined {
+  try {
+    const ext = /\.([a-z0-9]+)$/i.exec(new URL(url).pathname)?.[1]?.toLowerCase();
+    return ext ? MEDIA_EXTENSIONS[ext] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function mediaResponse(response: Response): CapturedMedia | undefined {
   const url = response.url();
   if (!/^https?:/i.test(url)) return undefined;
@@ -223,101 +250,176 @@ export class CdpEngine implements Engine {
         if (warning) warnings.push(warning);
       }
 
-      const rawHtml = await page.content();
-      const wantedFormats = new Set(req.formats ?? ["markdown"]);
-      const out: ScrapeResponseData = {};
-      const meta = await page.evaluate(() => {
-        const get = (sel: string): string | undefined =>
-          (document.querySelector(sel) as HTMLMetaElement | null)?.content ?? undefined;
-        return {
-          title: document.title || undefined,
-          description: get('meta[name="description"]'),
-          ogTitle: get('meta[property="og:title"]'),
-          ogDescription: get('meta[property="og:description"]'),
-        };
+      return await this.capture(page, req, {
+        response,
+        warnings,
+        ready,
+        mediaRequests: () => [...captured.values()],
+        signal,
       });
-      this.userAgent = await page.evaluate(() => navigator.userAgent);
-      out.metadata = {
-        ...meta,
-        sourceURL: req.url,
-        url: page.url(),
-        statusCode: response?.status() ?? null,
-        retryAfter: response?.headers()["retry-after"],
-        captureReady: ready,
-      };
-      if (wantedFormats.has("links")) {
-        out.links = await page.evaluate(() =>
-          [
-            ...new Set(
-              [...document.querySelectorAll("a[href]")].map((a) => (a as HTMLAnchorElement).href),
-            ),
-          ].filter((h) => /^https?:/.test(h)),
-        );
-      }
-      if (wantedFormats.has("screenshot")) {
-        try {
-          const buf = await page.screenshot({
-            fullPage: true,
-            type: "png",
-            animations: "disabled",
-          });
-          out.screenshot = `data:image/png;base64,${buf.toString("base64")}`;
-        } catch (err) {
-          signal?.throwIfAborted();
-          warnings.push(
-            `Screenshot unavailable: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-
-      // Strip noise nodes + dangerous attributes in the live DOM, then read
-      // the cleaned HTML back out. Mirrors removeUnwantedElements.ts in the API.
-      await page.evaluate((selectors: string[]) => {
-        for (const sel of selectors) {
-          for (const el of document.querySelectorAll(sel)) el.remove();
-        }
-        for (const el of document.querySelectorAll("*")) {
-          // Snapshot first — removing during live NamedNodeMap iteration skips entries.
-          const names = Array.from(el.attributes, (a) => a.name);
-          for (const name of names) {
-            if (name.startsWith("on") || name === "style") {
-              el.removeAttribute(name);
-            }
-          }
-        }
-      }, STRIP_SELECTORS as string[]);
-
-      const cleanedHtml = await page.content();
-      let html = cleanedHtml;
-      if (req.onlyMainContent) {
-        const article = this.extractMainContent(cleanedHtml, req.url);
-        if (article) {
-          html = article;
-        } else {
-          // Readability didn't recognize the page as article-shaped; fall back
-          // to a structural selector so we still narrow the scope.
-          const fallback = await page.evaluate(() => {
-            const node =
-              document.querySelector("main") ??
-              document.querySelector("article") ??
-              document.querySelector("[role='main']");
-            return node?.outerHTML ?? null;
-          });
-          if (fallback) html = fallback;
-        }
-      }
-
-      if (wantedFormats.has("html")) out.html = html;
-      if (wantedFormats.has("rawHtml")) out.rawHtml = rawHtml;
-      if (wantedFormats.has("markdown")) out.markdown = this.turndown.turndown(html);
-
-      if (captured.size > 0) out["mediaRequests"] = [...captured.values()];
-      if (warnings.length > 0) out["warning"] = warnings.join(" ");
-      return out;
     } finally {
       signal?.removeEventListener("abort", abort);
       if (!page.isClosed()) await page.close();
     }
+  }
+
+  /**
+   * Read a loaded page into scrape formats. The live DOM is never changed:
+   * cleaning runs on a clone, so this is safe on a tab someone else drives.
+   */
+  private async capture(
+    page: Page,
+    req: ScrapeRequest,
+    opts: {
+      response?: Response | null | undefined;
+      warnings: string[];
+      ready: boolean;
+      /** Read at the end, so media requested during capture are included. */
+      mediaRequests: () => CapturedMedia[];
+      signal?: AbortSignal | undefined;
+    },
+  ): Promise<ScrapeResponseData> {
+    const { response, warnings, signal } = opts;
+    const rawHtml = await page.content();
+    const wantedFormats = new Set(req.formats ?? ["markdown"]);
+    const out: ScrapeResponseData = {};
+    const meta = await page.evaluate(() => {
+      const get = (sel: string): string | undefined =>
+        (document.querySelector(sel) as HTMLMetaElement | null)?.content ?? undefined;
+      return {
+        title: document.title || undefined,
+        description: get('meta[name="description"]'),
+        ogTitle: get('meta[property="og:title"]'),
+        ogDescription: get('meta[property="og:description"]'),
+      };
+    });
+    this.userAgent = await page.evaluate(() => navigator.userAgent);
+    out.metadata = {
+      ...meta,
+      sourceURL: req.url,
+      url: page.url(),
+      statusCode: response?.status() ?? null,
+      retryAfter: response?.headers()["retry-after"],
+      captureReady: opts.ready,
+    };
+    if (wantedFormats.has("links")) {
+      out.links = await page.evaluate(() =>
+        [
+          ...new Set(
+            [...document.querySelectorAll("a[href]")].map((a) => (a as HTMLAnchorElement).href),
+          ),
+        ].filter((h) => /^https?:/.test(h)),
+      );
+    }
+    if (wantedFormats.has("screenshot")) {
+      try {
+        const buf = await page.screenshot({
+          fullPage: true,
+          type: "png",
+          animations: "disabled",
+        });
+        out.screenshot = `data:image/png;base64,${buf.toString("base64")}`;
+      } catch (err) {
+        signal?.throwIfAborted();
+        warnings.push(
+          `Screenshot unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // Strip noise nodes + dangerous attributes from a clone of the DOM.
+    // Mirrors removeUnwantedElements.ts in the API.
+    const cleaned = await page.evaluate((selectors: string[]) => {
+      const root = document.documentElement.cloneNode(true) as HTMLElement;
+      for (const sel of selectors) {
+        for (const el of root.querySelectorAll(sel)) el.remove();
+      }
+      for (const el of root.querySelectorAll("*")) {
+        // Snapshot first — removing during live NamedNodeMap iteration skips entries.
+        const names = Array.from(el.attributes, (a) => a.name);
+        for (const name of names) {
+          if (name.startsWith("on") || name === "style") {
+            el.removeAttribute(name);
+          }
+        }
+      }
+      const doctype = document.doctype
+        ? new XMLSerializer().serializeToString(document.doctype)
+        : "";
+      const main =
+        root.querySelector("main") ??
+        root.querySelector("article") ??
+        root.querySelector("[role='main']");
+      return { html: doctype + root.outerHTML, main: main?.outerHTML ?? null };
+    }, STRIP_SELECTORS as string[]);
+
+    let html = cleaned.html;
+    if (req.onlyMainContent) {
+      // Readability first; when the page isn't article-shaped, fall back to a
+      // structural selector so we still narrow the scope.
+      html = this.extractMainContent(cleaned.html, req.url) ?? cleaned.main ?? html;
+    }
+
+    if (wantedFormats.has("html")) out.html = html;
+    if (wantedFormats.has("rawHtml")) out.rawHtml = rawHtml;
+    if (wantedFormats.has("markdown")) out.markdown = this.turndown.turndown(html);
+
+    const mediaRequests = opts.mediaRequests();
+    if (mediaRequests.length > 0) out["mediaRequests"] = mediaRequests;
+    if (warnings.length > 0) out["warning"] = warnings.join(" ");
+    return out;
+  }
+
+  /** Open tabs in the shared browser, for picking one to capture. */
+  async openTabs(): Promise<Array<{ url: string; title: string }>> {
+    const browser = await this.ensureBrowser();
+    return Promise.all(
+      browser
+        .contexts()
+        .flatMap((context) => context.pages())
+        .map(async (page) => ({ url: page.url(), title: await page.title().catch(() => "") })),
+    );
+  }
+
+  /**
+   * Capture a tab that is already open (for example one an agent clicked to)
+   * without reloading it, so state built up by clicks is kept. `url` picks the
+   * tab; without it there must be exactly one http(s) tab.
+   */
+  async captureOpenTab(
+    req: Omit<ScrapeRequest, "url"> & { url?: string | undefined },
+  ): Promise<ScrapeResponseData> {
+    const browser = await this.ensureBrowser();
+    const tabs = browser
+      .contexts()
+      .flatMap((context) => context.pages())
+      .filter((page) => /^https?:/i.test(page.url()));
+    const matches = req.url ? tabs.filter((page) => page.url() === req.url) : tabs;
+    if (matches.length !== 1) {
+      const open = tabs.map((page) => page.url()).join(", ") || "none";
+      throw new Error(
+        req.url
+          ? `${matches.length === 0 ? "No" : "More than one"} open tab at ${req.url}; open tabs: ${open}`
+          : `Pass the tab's url: ${tabs.length === 0 ? "no" : tabs.length} http(s) tabs are open (${open})`,
+      );
+    }
+    const page = matches[0]!;
+    // Media the page loaded before this call: what the browser recorded as resources.
+    const loaded = await page.evaluate(() =>
+      performance.getEntriesByType("resource").map((entry) => entry.name),
+    );
+    const mediaRequests = loaded
+      .map((url) => ({ url, contentType: mediaTypeFromUrl(url) }))
+      .filter((m): m is CapturedMedia & { contentType: string } => m.contentType !== undefined);
+    return this.capture(
+      page,
+      { ...req, url: page.url() },
+      {
+        warnings: [],
+        ready: true,
+        mediaRequests: () => mediaRequests,
+      },
+    );
   }
 
   /**
