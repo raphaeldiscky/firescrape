@@ -2,15 +2,16 @@ import { JSDOM } from "jsdom";
 
 export interface MediaRef {
   url: string;
-  kind: "image" | "video" | "embed";
+  kind: "image" | "video" | "audio" | "embed";
   skipReason?: string;
 }
 
 const IMAGE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)(?:$|[?#])/i;
 const VIDEO = /\.(?:mp4|m4v|mov|ogv|webm)(?:$|[?#])/i;
+const AUDIO = /\.(?:mp3|m4a|aac|wav|ogg|oga|opus|flac|weba)(?:$|[?#])/i;
 const STREAM = /\.(?:m3u8|mpd)(?:$|[?#])/i;
 const NON_PAGE =
-  /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp|mp4|m4v|mov|ogv|webm|mp3|wav|ogg|m3u8|mpd|pdf|zip|gz|css|js|woff2?|ttf)(?:$|[?#])/i;
+  /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp|mp4|m4v|mov|ogv|webm|mp3|m4a|aac|wav|ogg|oga|opus|flac|weba|m3u8|mpd|pdf|zip|gz|css|js|woff2?|ttf)(?:$|[?#])/i;
 const ACTION =
   /(?:^|[/_-])(?:log[-_]?out|log[-_]?off|sign[-_]?out|sign[-_]?off|delete|remove)(?:$|[/_-])/i;
 
@@ -75,6 +76,7 @@ export function discover(html: string, pageUrl: string): { links: string[]; medi
       links.add(url);
       if (IMAGE.test(url)) add(url, "image");
       else if (VIDEO.test(url) || STREAM.test(url)) add(url, "video");
+      else if (AUDIO.test(url)) add(url, "audio");
     }
     for (const img of doc.querySelectorAll("img")) {
       for (const attr of ["src", "data-src", "data-original", "data-lazy-src"])
@@ -91,12 +93,18 @@ export function discover(html: string, pageUrl: string): { links: string[]; medi
       add(el.getAttribute("poster"), "image");
     }
     for (const el of doc.querySelectorAll("video source")) add(el.getAttribute("src"), "video");
+    for (const el of doc.querySelectorAll("audio[src], audio source[src]"))
+      add(el.getAttribute("src"), "audio");
     for (const el of doc.querySelectorAll('meta[property="og:image"], meta[name="twitter:image"]'))
       add(el.getAttribute("content"), "image");
     for (const el of doc.querySelectorAll(
       'meta[property="og:video"], meta[property="og:video:url"], meta[property="og:video:secure_url"]',
     ))
       add(el.getAttribute("content"), "video");
+    for (const el of doc.querySelectorAll(
+      'meta[property="og:audio"], meta[property="og:audio:url"], meta[property="og:audio:secure_url"]',
+    ))
+      add(el.getAttribute("content"), "audio");
     for (const el of doc.querySelectorAll("iframe[src], embed[src]"))
       add(el.getAttribute("src"), "embed");
     for (const el of doc.querySelectorAll("[style]")) {
@@ -109,4 +117,45 @@ export function discover(html: string, pageUrl: string): { links: string[]; medi
   } finally {
     dom.window.close();
   }
+}
+
+/** A media response the browser fetched, or a media element's resolved source. */
+export interface CapturedMedia {
+  url: string;
+  contentType?: string;
+}
+
+function capturedKind(url: string, contentType: string): "video" | "audio" | undefined {
+  if (/(?:mpegurl|dash\+xml)/.test(contentType) || STREAM.test(url)) return "video";
+  if (contentType.startsWith("audio/") || contentType === "application/ogg") return "audio";
+  if (contentType.startsWith("video/")) return "video";
+  if (contentType && contentType !== "application/octet-stream") return undefined;
+  if (AUDIO.test(url)) return "audio";
+  if (VIDEO.test(url)) return "video";
+  return undefined;
+}
+
+/**
+ * Append media the browser actually loaded (often set by scripts after the
+ * markup was written) to the media discovered in the page's HTML.
+ */
+export function mergeCaptured(
+  media: MediaRef[],
+  captured: readonly CapturedMedia[] | undefined,
+): MediaRef[] {
+  const merged = new Map(media.map((ref) => [ref.url, ref]));
+  for (const item of captured ?? []) {
+    const url = httpUrl(item.url);
+    if (!url || merged.has(url)) continue;
+    const type = (item.contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+    const kind = capturedKind(url, type);
+    if (!kind) continue;
+    const streaming = /(?:mpegurl|dash\+xml)/.test(type) || STREAM.test(url);
+    merged.set(url, {
+      url,
+      kind,
+      ...(streaming ? { skipReason: "Streaming manifest; direct files only" } : {}),
+    });
+  }
+  return [...merged.values()];
 }

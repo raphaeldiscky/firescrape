@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { discover, httpUrl, isPageUrl } from "./discovery.js";
+import { discover, httpUrl, isPageUrl, mergeCaptured } from "./discovery.js";
 import { assetPath, checkoutRoot, pagePath } from "./paths.js";
 
 describe("archive discovery", () => {
@@ -36,6 +36,47 @@ describe("archive discovery", () => {
     );
     expect(result.media.find((m) => m.kind === "embed")?.skipReason).toMatch(/Embedded/);
     expect(urls.some((url) => url.startsWith("data:"))).toBe(false);
+  });
+
+  it("finds audio elements, sources, links and og:audio, telling .ogg from .ogv", () => {
+    const result = discover(
+      `<audio src="/listen.mp3"></audio>
+      <audio><source src="part2.ogg" type="audio/ogg"></audio>
+      <a href="/files/answers.m4a">Download</a>
+      <meta property="og:audio" content="https://cdn.example.com/podcast.opus">
+      <video src="clip.ogv"></video>`,
+      "https://example.com/test/",
+    );
+    const kinds = Object.fromEntries(result.media.map((m) => [m.url, m.kind]));
+    expect(kinds).toMatchObject({
+      "https://example.com/listen.mp3": "audio",
+      "https://example.com/test/part2.ogg": "audio",
+      "https://example.com/files/answers.m4a": "audio",
+      "https://cdn.example.com/podcast.opus": "audio",
+      "https://example.com/test/clip.ogv": "video",
+    });
+    expect(isPageUrl("https://example.com/files/answers.m4a", "https://example.com")).toBe(false);
+  });
+
+  it("merges network-captured media by content type without duplicating discovered items", () => {
+    const discovered = discover(`<audio src="/listen.mp3"></audio>`, "https://example.com/").media;
+    const merged = mergeCaptured(discovered, [
+      { url: "https://example.com/listen.mp3", contentType: "audio/mpeg" },
+      { url: "https://cdn.example.com/track?id=7", contentType: "audio/mpeg; codecs=mp3" },
+      { url: "https://cdn.example.com/movie", contentType: "video/mp4" },
+      { url: "https://cdn.example.com/live.m3u8", contentType: "application/vnd.apple.mpegurl" },
+      { url: "blob:https://example.com/abc", contentType: "audio/mpeg" },
+      { url: "https://cdn.example.com/no-type.mp3" },
+      { url: "https://cdn.example.com/unknown", contentType: "text/html" },
+    ]);
+    expect(merged.map((m) => [m.url, m.kind, m.skipReason])).toEqual([
+      ["https://example.com/listen.mp3", "audio", undefined],
+      ["https://cdn.example.com/track?id=7", "audio", undefined],
+      ["https://cdn.example.com/movie", "video", undefined],
+      ["https://cdn.example.com/live.m3u8", "video", "Streaming manifest; direct files only"],
+      ["https://cdn.example.com/no-type.mp3", "audio", undefined],
+    ]);
+    expect(mergeCaptured(discovered, undefined)).toEqual(discovered);
   });
 
   it("ignores SVG-local filter references inside inline data images", () => {
@@ -82,6 +123,12 @@ describe("archive paths", () => {
     expect(pagePath("https://example.com/%2F..%2F/CON")).toContain("/_CON--");
     expect(assetPath("https://cdn.example.com/image?id=1", "image", "image/png")).toMatch(
       /^assets\/images\/image--[a-f0-9]{16}\.png$/,
+    );
+    expect(assetPath("https://cdn.example.com/listen.mp3", "audio", "audio/mpeg")).toMatch(
+      /^assets\/audio\/listen--[a-f0-9]{16}\.mp3$/,
+    );
+    expect(assetPath("https://cdn.example.com/track?id=7", "audio", "audio/mp4")).toMatch(
+      /^assets\/audio\/track--[a-f0-9]{16}\.m4a$/,
     );
   });
 });

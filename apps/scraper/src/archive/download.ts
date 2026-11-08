@@ -45,6 +45,13 @@ export function retryDelay(value: string | null | undefined, fallback = 1000): n
   return Number.isFinite(date) ? Math.max(0, date - Date.now()) : fallback;
 }
 
+// Audio-only files are commonly served with Ogg or MP4/WebM container types.
+const AUDIO_CONTAINERS = new Set(["application/ogg", "video/mp4", "video/webm", "video/ogg"]);
+
+function acceptsType(kind: MediaResult["kind"], type: string): boolean {
+  return type.startsWith(`${kind}/`) || (kind === "audio" && AUDIO_CONTAINERS.has(type));
+}
+
 export async function downloadMedia(ref: MediaRef, opts: DownloadOptions): Promise<MediaResult> {
   if (ref.skipReason || ref.kind === "embed")
     return { ...ref, status: "skipped", reason: ref.skipReason ?? "Embedded player" };
@@ -95,7 +102,7 @@ export async function downloadMedia(ref: MediaRef, opts: DownloadOptions): Promi
         await response.body.cancel();
         return { ...ref, status: "skipped", reason: "Streaming manifest; direct files only" };
       }
-      if (type && type !== "application/octet-stream" && !type.startsWith(`${ref.kind}/`)) {
+      if (type && type !== "application/octet-stream" && !acceptsType(ref.kind, type)) {
         await response.body.cancel();
         throw new Error(`Expected ${ref.kind} content, received ${type}`);
       }
