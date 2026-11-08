@@ -41,6 +41,7 @@ beforeAll(async () => {
   });
   client = new Client({ name: "test", version: "0" });
   // Any stdout line that is not JSON-RPC surfaces here.
+  // oxlint-disable-next-line prefer-add-event-listener -- an SDK callback property, not an EventTarget
   client.onerror = (err) => protocolErrors.push(err);
   await client.connect(transport);
 }, 30_000);

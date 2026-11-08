@@ -56,6 +56,18 @@ const language = z
   .optional()
   .describe("Spoken language code such as en, or auto (default)");
 
+function choices(args: {
+  workers?: number | undefined;
+  language?: string | undefined;
+}): TranscribeChoices {
+  return {
+    workers: args.workers ?? 2,
+    language: args.language ?? "auto",
+    model: undefined,
+    cpu: false,
+  };
+}
+
 export interface ServerDeps {
   config: Config;
   dataDir: string;
@@ -89,15 +101,6 @@ export function createServer({ config, dataDir, ...deps }: ServerDeps) {
         `No Chrome answered at ${cdpUrl} (${check.error}). Start it with \`task scraper:chrome\` and log in there first.`,
       );
   };
-  const choices = (args: {
-    workers?: number | undefined;
-    language?: string | undefined;
-  }): TranscribeChoices => ({
-    workers: args.workers ?? 2,
-    language: args.language ?? "auto",
-    model: undefined,
-    cpu: false,
-  });
   const requireWhisper = (): void => {
     if (!whisperStatus(resolveWhisper(config)).ready)
       throw new Error(
@@ -347,6 +350,7 @@ export async function runMcpServer(config: Config, dataDir: string): Promise<voi
   const { server, close } = createServer({ config, dataDir });
   let closing: Promise<void> | undefined;
   const shutdown = (): Promise<void> => (closing ??= close().then(() => server.close()));
+  // oxlint-disable-next-line prefer-add-event-listener -- an SDK callback property, not an EventTarget
   server.server.onclose = () => {
     void shutdown();
   };
