@@ -404,6 +404,9 @@ export class CdpEngine implements Engine {
       );
     }
     const page = matches[0]!;
+    // This tab was not opened by scrape(), so it lacks the `__name` shim (see
+    // scrape's addInitScript). A string is not rewritten by tsx/esbuild.
+    await page.evaluate("globalThis.__name ??= (fn) => fn");
     // Media the page loaded before this call: what the browser recorded as resources.
     const loaded = await page.evaluate(() =>
       performance.getEntriesByType("resource").map((entry) => entry.name),
