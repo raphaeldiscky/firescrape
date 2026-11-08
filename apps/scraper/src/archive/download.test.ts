@@ -35,6 +35,16 @@ beforeAll(async () => {
       res.end("login");
       return;
     }
+    if (path === "/audio") {
+      res.writeHead(200, { "Content-Type": "audio/mpeg" });
+      res.end("audio");
+      return;
+    }
+    if (path === "/ogg") {
+      res.writeHead(200, { "Content-Type": "application/ogg" });
+      res.end("ogg");
+      return;
+    }
     if (path === "/stream") {
       res.writeHead(200, { "Content-Type": "application/x-mpegURL" });
       res.end("playlist");
@@ -91,6 +101,28 @@ describe("media downloads", () => {
     expect(result.status).toBe("downloaded");
     expect(result.bytes).toBe(5);
     expect(await readFile(join(root, result.path!), "utf8")).toBe("image");
+  });
+
+  it("saves audio served as audio/* or application/ogg and rejects HTML", async () => {
+    const mp3 = await downloadMedia(
+      { url: `${base}/audio`, kind: "audio" },
+      { root, maxBytes: 100, headers },
+    );
+    expect(mp3).toMatchObject({ status: "downloaded", bytes: 5 });
+    expect(mp3.path).toMatch(/^assets\/audio\/audio--[a-f0-9]{16}\.mp3$/);
+    const ogg = await downloadMedia(
+      { url: `${base}/ogg`, kind: "audio" },
+      { root, maxBytes: 100, headers },
+    );
+    expect(ogg.status).toBe("downloaded");
+    const html = await downloadMedia(
+      { url: `${base}/html`, kind: "audio" },
+      { root, maxBytes: 100, headers },
+    );
+    expect(html).toMatchObject({
+      status: "failed",
+      reason: "Expected audio content, received text/html",
+    });
   });
 
   it("emits byte updates before a slow download completes", async () => {
