@@ -20,7 +20,7 @@ export interface Manifest {
   startedAt: string;
   finishedAt?: string;
   status: "running" | "completed" | "partial" | "interrupted";
-  settings: { limit: number; maxMediaMb: number; delayMs: number };
+  settings: { limit: number; maxMediaMb: number; delayMs: number; playMedia: boolean };
   limitReached: boolean;
   pages: PageResult[];
   assets: MediaResult[];
