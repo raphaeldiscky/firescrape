@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { Command } from "commander";
 import { loadConfig } from "./config.js";
 import { parseMediaKinds, runArchive, type MediaKind } from "./commands/archive.js";
@@ -288,6 +289,20 @@ program
       includeSubdomains: Boolean(local["includeSubdomains"]),
       out: resolvePath(local["out"] as string | undefined),
     });
+  });
+
+program
+  .command("mcp")
+  .description("Serve the scraper to AI agents as an MCP server over stdio")
+  .option("--data-dir <path>", "archive root the tools read and write (default: checkout data/)")
+  .action(async (local: { dataDir?: string }) => {
+    const g = program.opts();
+    const config = await loadConfig(resolveUserPath(g["config"] as string));
+    if (g["apiUrl"]) config.apiUrl = g["apiUrl"] as string;
+    if (g["cdpUrl"]) config.cdp = { url: g["cdpUrl"] as string };
+    const { checkoutRoot } = await import("./archive/paths.js");
+    const dataDir = local.dataDir ? resolveUserPath(local.dataDir) : join(checkoutRoot(), "data");
+    await (await import("./mcp/server.js")).runMcpServer(config, dataDir);
   });
 
 async function main(): Promise<void> {

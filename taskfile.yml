@@ -145,6 +145,14 @@ tasks:
         echo "Chrome did not answer on :{{.CDP_PORT}} within 15s; see {{.PROFILE}}/chrome.log" >&2
         exit 1
 
+  scraper:mcp:
+    desc: 'Run the scraper MCP server over stdio (Claude Code starts it from .mcp.json; this is for debugging)'
+    dir: apps/cli/scraper
+    env:
+      SCRAPER_INVOKE_CWD: "{{.USER_WORKING_DIR}}"
+    cmds:
+      - pnpm exec tsx src/cli.ts mcp {{.CLI_ARGS}}
+
   scraper:install:
     desc: Install scraper deps
     dir: apps/cli/scraper

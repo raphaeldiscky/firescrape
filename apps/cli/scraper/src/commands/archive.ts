@@ -75,7 +75,7 @@ export interface ArchiveTranscribeOptions {
 const TRANSCRIBABLE = new Set<MediaResult["kind"]>(["audio", "video"]);
 
 export function mediaHeaders(
-  engine: Engine,
+  engine: Pick<Engine, "downloadHeaders">,
   configured: Record<string, string> | undefined,
   sourceUrl: string,
   pageUrl: string,
