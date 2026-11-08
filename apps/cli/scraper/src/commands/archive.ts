@@ -7,6 +7,7 @@ import {
   isPageUrl,
   mergeCaptured,
   type CapturedMedia,
+  type MediaRef,
 } from "../archive/discovery.js";
 import { downloadMedia, retryDelay, type MediaResult } from "../archive/download.js";
 import { TextReporter, type ArchiveReporter } from "../archive/reporter.js";
@@ -19,6 +20,7 @@ import {
   type PageResult,
   type TranscriptEntry,
 } from "../archive/storage.js";
+import type { ScrapeRequest } from "../client.js";
 import type { Config } from "../config.js";
 import { createEnginePool, type Engine, type EngineName } from "../engines/index.js";
 import type { ScrapeResponseData } from "../formats/types.js";
@@ -117,10 +119,6 @@ export async function runArchive(
     assertWhisperReady(opts.transcribe.settings.whisper);
   const reporter = opts.reporter ?? new TextReporter();
 
-  const wanted = opts.media ?? [...MEDIA_KINDS];
-  const selected = (kind: MediaResult["kind"]): boolean =>
-    wanted.includes(kind === "embed" ? "video" : kind);
-
   const pool = createEnginePool(opts.config, opts.cdpUrlOverride, { playMedia: opts.playMedia });
   try {
     const engine = pool.get(opts.engineName);
@@ -128,73 +126,25 @@ export async function runArchive(
       await ensureApiReady(opts.config.apiUrl, opts.signal, (event) => reporter.setup(event));
     await engine.prepare?.();
     opts.signal?.throwIfAborted();
-    const root = await createRun(sourceUrl, opts.out);
-    reporter.started(root);
-    const manifest: Manifest = {
+    const session = await ArchiveSession.open({
       sourceUrl,
-      engine: opts.engineName,
-      startedAt: new Date().toISOString(),
-      status: "running",
-      settings: {
-        limit: opts.limit,
-        maxMediaMb: opts.maxMediaMb,
-        delayMs: opts.delayMs,
-        playMedia: opts.playMedia ?? false,
-        media: wanted,
-        ...(opts.transcribe
-          ? {
-              transcribe: {
-                workers: opts.transcribe.workers,
-                language: opts.transcribe.settings.language,
-                model: basename(opts.transcribe.settings.whisper.model),
-              },
-            }
-          : {}),
-      },
-      limitReached: false,
-      pages: [],
-      assets: [],
-      ...(opts.transcribe ? { transcripts: [] } : {}),
-    };
-    const transcripts = new Map<string, TranscriptEntry>();
-    const transcriber = opts.transcribe
-      ? new TranscribeQueue({
-          workers: opts.transcribe.workers,
-          settings: opts.transcribe.settings,
-          signal: opts.signal,
-          onEvent: (event) => reporter.transcription(event),
-          ...(opts.transcribe.runner ? { runner: opts.transcribe.runner } : {}),
-        })
-      : undefined;
-    // Queue a fresh audio/video download; the crawl continues while workers transcribe.
-    const transcribe = (asset: MediaResult): void => {
-      if (!transcriber || asset.status !== "downloaded" || !asset.path) return;
-      if (!TRANSCRIBABLE.has(asset.kind) || transcripts.has(asset.path)) return;
-      const entry: TranscriptEntry = { asset: asset.url, media: asset.path, status: "queued" };
-      transcripts.set(asset.path, entry);
-      void transcriber
-        .add({
-          input: join(root, asset.path),
-          // Transcripts sit next to their media, inside the page folder.
-          base: join(root, withoutExtension(asset.path)),
-          label: basename(asset.path, extname(asset.path)),
-        })
-        .then((result) => {
-          entry.status = result.status;
-          entry.files = result.files?.map((file) => relative(root, file));
-          entry.language = result.language;
-          entry.durationSec = result.durationSec;
-          entry.segments = result.segments;
-          entry.reason = result.reason;
-        });
-    };
+      engineName: opts.engineName,
+      out: opts.out,
+      limit: opts.limit,
+      maxMediaMb: opts.maxMediaMb,
+      delayMs: opts.delayMs,
+      playMedia: opts.playMedia ?? false,
+      media: opts.media,
+      transcribe: opts.transcribe,
+      reporter,
+      signal: opts.signal,
+    });
+    const { root, manifest } = session;
     const queue = [sourceUrl];
     const seen = new Set(queue);
     const finalUrls = new Set<string>();
-    const assets = new Map<string, MediaResult>();
     let origin = new URL(sourceUrl).origin;
     let nextAt = 0;
-    await saveManifest(root, manifest);
     try {
       // Visit links breadth-first until the queue is exhausted or --limit attempts
       // are reached (default 100). Failures/redirects count too; this is not a depth limit.
@@ -205,20 +155,11 @@ export async function runArchive(
         const result: PageResult = { url, path: pagePath(url), status: "failed" };
         let data: ScrapeResponseData = {};
         let links: string[] = [];
-        const media: MediaResult[] = [];
+        let media: MediaResult[] = [];
         let backoff = 0;
         reporter.page(i + 1, opts.limit, url);
         try {
-          const req = buildRequest(url, opts.config, opts.profileName, []);
-          req.formats = [
-            "markdown",
-            "html",
-            "rawHtml",
-            "links",
-            ...(opts.engineName === "cdp" ? ["screenshot"] : []),
-          ];
-          req.onlyMainContent = false;
-          req.actions = undefined;
+          const req = archiveRequest(url, opts.config, opts.profileName, opts.engineName);
           data = await engine.scrape(req, opts.signal);
           const finalUrl = httpUrl(String(data.metadata?.["url"] ?? url)) ?? url;
           result.finalUrl = finalUrl;
@@ -236,21 +177,8 @@ export async function runArchive(
             result.reason = "Duplicate redirect target";
           } else {
             finalUrls.add(finalUrl);
-            const discovered = discover(data.rawHtml ?? data.html ?? "", finalUrl);
-            const pageMedia = mergeCaptured(
-              discovered.media,
-              Array.isArray(data["mediaRequests"])
-                ? (data["mediaRequests"] as CapturedMedia[])
-                : undefined,
-            );
-            links = [
-              ...new Set([
-                ...discovered.links,
-                ...(data.links ?? [])
-                  .map((link) => httpUrl(link, finalUrl))
-                  .filter((link): link is string => Boolean(link)),
-              ]),
-            ];
+            const page = pageContents(data, finalUrl);
+            links = page.links;
             for (const link of links) {
               if (isPageUrl(link, origin) && !seen.has(link) && !finalUrls.has(link)) {
                 seen.add(link);
@@ -258,37 +186,7 @@ export async function runArchive(
               }
             }
             const headers = mediaHeaders(engine, req.headers, url, finalUrl);
-            reporter.pageCaptured(pageMedia.length);
-            try {
-              for (const [index, ref] of pageMedia.entries()) {
-                let asset = assets.get(ref.url);
-                const reused = Boolean(asset && !(asset.kind === "embed" && ref.kind !== "embed"));
-                reporter.mediaStarted(index + 1, pageMedia.length, ref.url, reused);
-                if (!selected(ref.kind)) {
-                  asset = { ...ref, status: "skipped", reason: "Media type not selected" };
-                  assets.set(ref.url, asset);
-                } else if (!asset || !reused) {
-                  asset = await downloadMedia(ref, {
-                    root,
-                    pageDir: result.path,
-                    maxBytes: opts.maxMediaMb * 1_000_000,
-                    headers,
-                    signal: opts.signal,
-                    onProgress: (progress) => reporter.mediaProgress(progress),
-                  });
-                  assets.set(ref.url, asset);
-                  transcribe(asset);
-                }
-                reporter.mediaFinished(asset, reused);
-                media.push(asset);
-              }
-            } finally {
-              reporter.mediaDone();
-            }
-            const playable = media
-              .filter((a) => TRANSCRIBABLE.has(a.kind) && a.status === "downloaded" && a.path)
-              .map((a) => a.path!);
-            if (playable.length > 0) result.media = [...new Set(playable)];
+            media = await session.downloadPageMedia(result, page.media, headers);
             result.status = "saved";
           }
           if (typeof data["warning"] === "string") result.warning = data["warning"];
@@ -304,38 +202,253 @@ export async function runArchive(
               : String(err);
           reporter.pageFailed(url, result.reason);
         }
-        await savePage(root, result, data, links, media);
-        manifest.pages.push(result);
-        manifest.assets = [...assets.values()];
-        if (transcriber) manifest.transcripts = [...transcripts.values()];
-        await saveManifest(root, manifest);
+        await session.record(result, data, links, media);
         nextAt = Date.now() + Math.max(opts.delayMs, backoff);
       }
       opts.signal?.throwIfAborted();
-      await transcriber?.drain();
-      opts.signal?.throwIfAborted();
-      manifest.limitReached =
-        queue.length > manifest.pages.length && manifest.pages.length >= opts.limit;
-      manifest.status =
-        manifest.pages.some((p) => p.status === "failed") ||
-        manifest.assets.some((a) => a.status === "failed") ||
-        [...transcripts.values()].some((t) => t.status === "failed")
-          ? "partial"
-          : "completed";
+      await session.complete(
+        queue.length > manifest.pages.length && manifest.pages.length >= opts.limit,
+      );
     } catch (err) {
       manifest.status = opts.signal?.aborted ? "interrupted" : "partial";
       if (!opts.signal?.aborted) throw err;
     } finally {
-      // On errors or Ctrl+C the queue settles quickly: aborted jobs end as "Interrupted".
-      await transcriber?.drain();
-      manifest.finishedAt = new Date().toISOString();
-      manifest.assets = [...assets.values()];
-      if (transcriber) manifest.transcripts = [...transcripts.values()];
-      await saveManifest(root, manifest);
-      reporter.finished(manifest.status, join(root, "index.md"));
+      await session.close();
     }
     return { root, manifest };
   } finally {
     await pool.closeAll();
+  }
+}
+
+/** The fixed formats an archive captures, whatever the profile asks for. */
+export function archiveRequest(
+  url: string,
+  config: Config,
+  profileName: string,
+  engineName: EngineName,
+): ScrapeRequest {
+  const req = buildRequest(url, config, profileName, []);
+  req.formats = [
+    "markdown",
+    "html",
+    "rawHtml",
+    "links",
+    ...(engineName === "cdp" ? ["screenshot"] : []),
+  ];
+  req.onlyMainContent = false;
+  req.actions = undefined;
+  return req;
+}
+
+/** Links and media references found in a scraped page. */
+export function pageContents(
+  data: ScrapeResponseData,
+  finalUrl: string,
+): { links: string[]; media: MediaRef[] } {
+  const discovered = discover(data.rawHtml ?? data.html ?? "", finalUrl);
+  const media = mergeCaptured(
+    discovered.media,
+    Array.isArray(data["mediaRequests"]) ? (data["mediaRequests"] as CapturedMedia[]) : undefined,
+  );
+  const links = [
+    ...new Set([
+      ...discovered.links,
+      ...(data.links ?? [])
+        .map((link) => httpUrl(link, finalUrl))
+        .filter((link): link is string => Boolean(link)),
+    ]),
+  ];
+  return { links, media };
+}
+
+export interface ArchiveSessionOptions {
+  sourceUrl: string;
+  engineName: EngineName;
+  out: string | undefined;
+  /** Recorded in the manifest; the session itself does not count pages. */
+  limit: number;
+  maxMediaMb: number;
+  delayMs: number;
+  playMedia: boolean;
+  media?: MediaKind[] | undefined;
+  transcribe?: ArchiveTranscribeOptions | undefined;
+  reporter: ArchiveReporter;
+  signal?: AbortSignal | undefined;
+}
+
+/**
+ * One archive run folder: saves pages, downloads each page's media into its
+ * folder (once per run), and transcribes audio/video in the background. The
+ * crawler feeds it pages it visits; MCP captures feed it tabs an agent opened.
+ */
+export class ArchiveSession {
+  private readonly transcripts = new Map<string, TranscriptEntry>();
+  private readonly assets = new Map<string, MediaResult>();
+  private readonly transcriber: TranscribeQueue | undefined;
+  private readonly wanted: MediaKind[];
+
+  private constructor(
+    readonly root: string,
+    readonly manifest: Manifest,
+    private readonly opts: ArchiveSessionOptions,
+  ) {
+    this.wanted = opts.media ?? [...MEDIA_KINDS];
+    this.transcriber = opts.transcribe
+      ? new TranscribeQueue({
+          workers: opts.transcribe.workers,
+          settings: opts.transcribe.settings,
+          signal: opts.signal,
+          onEvent: (event) => opts.reporter.transcription(event),
+          ...(opts.transcribe.runner ? { runner: opts.transcribe.runner } : {}),
+        })
+      : undefined;
+  }
+
+  static async open(opts: ArchiveSessionOptions): Promise<ArchiveSession> {
+    const root = await createRun(opts.sourceUrl, opts.out);
+    opts.reporter.started(root);
+    const manifest: Manifest = {
+      sourceUrl: opts.sourceUrl,
+      engine: opts.engineName,
+      startedAt: new Date().toISOString(),
+      status: "running",
+      settings: {
+        limit: opts.limit,
+        maxMediaMb: opts.maxMediaMb,
+        delayMs: opts.delayMs,
+        playMedia: opts.playMedia,
+        media: opts.media ?? [...MEDIA_KINDS],
+        ...(opts.transcribe
+          ? {
+              transcribe: {
+                workers: opts.transcribe.workers,
+                language: opts.transcribe.settings.language,
+                model: basename(opts.transcribe.settings.whisper.model),
+              },
+            }
+          : {}),
+      },
+      limitReached: false,
+      pages: [],
+      assets: [],
+      ...(opts.transcribe ? { transcripts: [] } : {}),
+    };
+    await saveManifest(root, manifest);
+    return new ArchiveSession(root, manifest, opts);
+  }
+
+  private selected(kind: MediaResult["kind"]): boolean {
+    return this.wanted.includes(kind === "embed" ? "video" : kind);
+  }
+
+  // Queue a fresh audio/video download; the crawl continues while workers transcribe.
+  private transcribe(asset: MediaResult): void {
+    const { transcriber, transcripts, root } = this;
+    if (!transcriber || asset.status !== "downloaded" || !asset.path) return;
+    if (!TRANSCRIBABLE.has(asset.kind) || transcripts.has(asset.path)) return;
+    const entry: TranscriptEntry = { asset: asset.url, media: asset.path, status: "queued" };
+    transcripts.set(asset.path, entry);
+    void transcriber
+      .add({
+        input: join(root, asset.path),
+        // Transcripts sit next to their media, inside the page folder.
+        base: join(root, withoutExtension(asset.path)),
+        label: basename(asset.path, extname(asset.path)),
+      })
+      .then((result) => {
+        entry.status = result.status;
+        entry.files = result.files?.map((file) => relative(root, file));
+        entry.language = result.language;
+        entry.durationSec = result.durationSec;
+        entry.segments = result.segments;
+        entry.reason = result.reason;
+      });
+  }
+
+  /**
+   * Download a page's media into its folder (media seen on an earlier page is
+   * reused) and record its audio/video on `result.media`.
+   */
+  async downloadPageMedia(
+    result: PageResult,
+    refs: MediaRef[],
+    headers: (url: string) => Promise<Record<string, string>>,
+  ): Promise<MediaResult[]> {
+    const { reporter } = this.opts;
+    const media: MediaResult[] = [];
+    reporter.pageCaptured(refs.length);
+    try {
+      for (const [index, ref] of refs.entries()) {
+        let asset = this.assets.get(ref.url);
+        const reused = Boolean(asset && !(asset.kind === "embed" && ref.kind !== "embed"));
+        reporter.mediaStarted(index + 1, refs.length, ref.url, reused);
+        if (!this.selected(ref.kind)) {
+          asset = { ...ref, status: "skipped", reason: "Media type not selected" };
+          this.assets.set(ref.url, asset);
+        } else if (!asset || !reused) {
+          asset = await downloadMedia(ref, {
+            root: this.root,
+            pageDir: result.path,
+            maxBytes: this.opts.maxMediaMb * 1_000_000,
+            headers,
+            signal: this.opts.signal,
+            onProgress: (progress) => reporter.mediaProgress(progress),
+          });
+          this.assets.set(ref.url, asset);
+          this.transcribe(asset);
+        }
+        reporter.mediaFinished(asset, reused);
+        media.push(asset);
+      }
+    } finally {
+      reporter.mediaDone();
+    }
+    const playable = media
+      .filter((a) => TRANSCRIBABLE.has(a.kind) && a.status === "downloaded" && a.path)
+      .map((a) => a.path!);
+    if (playable.length > 0) result.media = [...new Set(playable)];
+    return media;
+  }
+
+  /** Save a page's files and add it to the manifest and index. */
+  async record(
+    result: PageResult,
+    data: ScrapeResponseData,
+    links: string[],
+    media: MediaResult[],
+  ): Promise<void> {
+    await savePage(this.root, result, data, links, media);
+    this.manifest.pages.push(result);
+    this.sync();
+    await saveManifest(this.root, this.manifest);
+  }
+
+  private sync(): void {
+    this.manifest.assets = [...this.assets.values()];
+    if (this.transcriber) this.manifest.transcripts = [...this.transcripts.values()];
+  }
+
+  /** Wait for transcripts, then mark the run completed or partial. */
+  async complete(limitReached = false): Promise<void> {
+    await this.transcriber?.drain();
+    this.opts.signal?.throwIfAborted();
+    this.manifest.limitReached = limitReached;
+    this.manifest.status =
+      this.manifest.pages.some((p) => p.status === "failed") ||
+      [...this.assets.values()].some((a) => a.status === "failed") ||
+      [...this.transcripts.values()].some((t) => t.status === "failed")
+        ? "partial"
+        : "completed";
+  }
+
+  /** Always call last: settles transcription and writes the final manifest. */
+  async close(): Promise<void> {
+    // On errors or Ctrl+C the queue settles quickly: aborted jobs end as "Interrupted".
+    await this.transcriber?.drain();
+    this.manifest.finishedAt = new Date().toISOString();
+    this.sync();
+    await saveManifest(this.root, this.manifest);
+    this.opts.reporter.finished(this.manifest.status, join(this.root, "index.md"));
   }
 }

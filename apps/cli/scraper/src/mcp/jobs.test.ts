@@ -26,7 +26,7 @@ type ArchiveResult = Awaited<ReturnType<ExecuteDeps["archive"]>>;
 
 /** An archive that reports progress, then waits for `release` (or an abort). */
 function gatedDeps() {
-  let release: () => void = () => {};
+  let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   const deps: ExecuteDeps = {
     install: vi.fn(),
