@@ -280,4 +280,4 @@ Interfaces: `Format`, `InputSource`, `OutputWriter` (in each dir's `types.ts`).
 
 All deps pinned exact (no `^`/`~`).
 
-CI runs typecheck + lint + tests + build on every push or PR that touches `apps/scraper/**` (`.github/workflows/scraper-ci.yml`).
+CI runs typecheck + lint + tests + build on every push or PR that touches `apps/cli/scraper/**` (`.github/workflows/scraper-ci.yml`).

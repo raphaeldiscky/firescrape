@@ -8,7 +8,7 @@ export function checkoutRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   while (
     !existsSync(join(dir, "taskfile.yml")) ||
-    !existsSync(join(dir, "apps/scraper/package.json"))
+    !existsSync(join(dir, "apps/cli/scraper/package.json"))
   ) {
     const parent = dirname(dir);
     if (parent === dir) throw new Error("Cannot locate checkout root; pass --out explicitly");
