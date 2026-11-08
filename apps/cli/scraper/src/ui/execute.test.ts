@@ -8,7 +8,7 @@ const config = { transcribe: { whisperBin: "/w/whisper-cli", model: "/w/model.bi
 
 const archivePlan: ArchiveRunPlan = {
   kind: "archive",
-  url: "https://example.com/",
+  urls: ["https://example.com/"],
   engine: "cdp",
   cdpUrl: "http://localhost:9222",
   playMedia: false,
@@ -82,6 +82,52 @@ describe("executePlan", () => {
       ),
     );
     expect(codes).toEqual([1, 130]);
+  });
+
+  it("archives several URLs in order and keeps going after a failed site", async () => {
+    const plan = {
+      ...archivePlan,
+      urls: ["https://a.test/", "https://b.test/", "https://c.test/"],
+      setupFirst: false,
+    };
+    const { deps } = fakes();
+    const seen: string[] = [];
+    deps.archive = vi.fn(async (opts: ArchiveOptions) => {
+      seen.push(opts.url);
+      if (opts.url === "https://a.test/") throw new Error("CDP connect failed");
+      return { root: "/data/run", manifest: { status: "completed" } } as Awaited<
+        ReturnType<ExecuteDeps["archive"]>
+      >;
+    });
+    const store = storeFor(plan);
+    expect(store.getSnapshot().title).toBe("Archiving 3 sites");
+    expect(await executePlan(plan, config, store, new AbortController().signal, deps)).toBe(1);
+    expect(seen).toEqual(["https://a.test/", "https://b.test/", "https://c.test/"]);
+    expect(store.getSnapshot().errors).toEqual(["https://a.test/: CDP connect failed"]);
+    expect(store.getSnapshot().done).toMatchObject({ status: "partial" });
+    expect(store.getSnapshot().done?.detail).toContain("2 of 3 sites archived, 1 failed");
+  });
+
+  it("stops the remaining sites when interrupted", async () => {
+    const plan = {
+      ...archivePlan,
+      urls: ["https://a.test/", "https://b.test/"],
+      setupFirst: false,
+    };
+    const controller = new AbortController();
+    const { deps } = fakes();
+    const seen: string[] = [];
+    deps.archive = vi.fn(async (opts: ArchiveOptions) => {
+      seen.push(opts.url);
+      controller.abort();
+      return { root: "/data/run", manifest: { status: "interrupted" } } as Awaited<
+        ReturnType<ExecuteDeps["archive"]>
+      >;
+    });
+    const store = storeFor(plan);
+    expect(await executePlan(plan, config, store, controller.signal, deps)).toBe(130);
+    expect(seen).toEqual(["https://a.test/"]);
+    expect(store.getSnapshot().done).toMatchObject({ status: "interrupted" });
   });
 
   it("reports transcription results and fails when any file failed", async () => {

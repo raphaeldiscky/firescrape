@@ -1,5 +1,5 @@
 import { MultiSelect, Spinner, TextInput } from "@inkjs/ui";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, usePaste } from "ink";
 import { useEffect, useRef, useState } from "react";
 import { MEDIA_KINDS, type MediaKind } from "../commands/archive.js";
 import type { TranscribeChoices } from "../commands/transcribe.js";
@@ -11,7 +11,8 @@ export type Engine = "cdp" | "api";
 
 export interface ArchiveRunPlan {
   kind: "archive";
-  url: string;
+  /** Archived one after another, each as its own run. */
+  urls: string[];
   engine: Engine;
   cdpUrl: string | undefined;
   playMedia: boolean;
@@ -51,7 +52,7 @@ type Mode = "archive" | "transcribe" | "setup";
 
 interface Answers {
   mode: Mode;
-  url: string;
+  urls: string[];
   engine: Engine;
   cdpUrl: string;
   browser: string | undefined;
@@ -151,7 +152,7 @@ function buildPlan(a: Answers, whisperReady: boolean): RunPlan {
   const transcribe = a.transcribe && hasAudioOrVideo(a.media) ? choices : undefined;
   return {
     kind: "archive",
-    url: a.url,
+    urls: a.urls,
     engine: a.engine,
     cdpUrl: a.engine === "cdp" ? a.cdpUrl : undefined,
     playMedia: a.engine === "cdp" && a.playMedia,
@@ -181,7 +182,9 @@ function describe(step: StepId, a: Answers): [string, string] | undefined {
         { archive: "Archive a site", transcribe: "Transcribe files", setup: "Set up" }[a.mode],
       ];
     case "url":
-      return ["URL", a.url];
+      return a.urls.length === 1
+        ? ["URL", a.urls[0]!]
+        : [`URLs (${a.urls.length})`, a.urls.join(" ")];
     case "engine":
       return ["Engine", ENGINE_LABELS[a.engine]];
     case "cdpUrl":
@@ -312,6 +315,63 @@ function parseUrl(raw: string): Parsed<string> {
   }
 }
 
+/** Split on spaces, new lines or commas; every token must be an http(s) URL. Duplicates are dropped. */
+export function parseUrls(raw: string): Parsed<string[]> {
+  const tokens = raw.split(/[\s,]+/).filter(Boolean);
+  if (tokens.length === 0) return { error: "Enter an http(s) URL" };
+  const urls: string[] = [];
+  for (const token of tokens) {
+    const parsed = parseUrl(token);
+    if ("error" in parsed) return { error: `Not an http(s) URL: ${token}` };
+    if (!urls.includes(parsed.value)) urls.push(parsed.value);
+  }
+  return { value: urls };
+}
+
+/**
+ * One line of URLs. A pasted multi-line list arrives through bracketed paste
+ * and is appended with its new lines turned into spaces.
+ */
+function UrlListStep({
+  initial,
+  onSubmit,
+}: {
+  initial: string;
+  onSubmit: (urls: string[]) => void;
+}) {
+  const value = useRef(initial);
+  const [field, setField] = useState({ text: initial, version: 0 });
+  const [error, setError] = useState<string>();
+  usePaste((pasted) => {
+    const text = [value.current, pasted.replace(/\s+/g, " ")].join(" ").trim();
+    value.current = text;
+    setField((f) => ({ text, version: f.version + 1 }));
+  });
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Text color="cyan">❯ </Text>
+        <TextInput
+          key={field.version}
+          defaultValue={field.text}
+          onChange={(text) => {
+            value.current = text;
+          }}
+          onSubmit={(raw) => {
+            const parsed = parseUrls(raw);
+            if ("error" in parsed) setError(parsed.error);
+            else onSubmit(parsed.value);
+          }}
+        />
+      </Box>
+      {error && <Text color="red">{error}</Text>}
+      <Text dimColor>
+        Separate several URLs with spaces or new lines; each becomes its own run.
+      </Text>
+    </Box>
+  );
+}
+
 const LANGUAGES = ["auto", "en", "id", "ja", "zh", "ko", "es", "fr", "de", "pt", "ru", "ar", "hi"];
 
 function CdpCheckStep({
@@ -419,7 +479,7 @@ function SourceStep({ deps, onPick }: { deps: WizardDeps; onPick: (inputs: strin
 
 const QUESTIONS: Record<StepId, string> = {
   mode: "What do you want to do?",
-  url: "Which site should be archived?",
+  url: "Which site(s) should be archived?",
   engine: "Which engine should load the pages?",
   cdpUrl: "Chrome DevTools URL",
   cdpCheck: "Connecting to Chrome",
@@ -444,7 +504,7 @@ export function Wizard({ deps, onDone }: { deps: WizardDeps; onDone: (plan: RunP
   const [history, setHistory] = useState<StepId[]>([]);
   const [a, setAnswers] = useState<Answers>(() => ({
     mode: "archive",
-    url: "",
+    urls: [],
     engine: "cdp",
     cdpUrl: deps.defaultCdpUrl,
     browser: undefined,
@@ -538,11 +598,10 @@ export function Wizard({ deps, onDone }: { deps: WizardDeps; onDone: (plan: RunP
         );
       case "url":
         return (
-          <TextStep
+          <UrlListStep
             key={step}
-            initial={a.url}
-            parse={parseUrl}
-            onSubmit={(url) => answer({ url })}
+            initial={a.urls.join(" ")}
+            onSubmit={(urls) => answer({ urls })}
           />
         );
       case "engine":
@@ -747,7 +806,9 @@ function Review({ plan }: { plan: RunPlan }) {
   const rows: Array<[string, string]> =
     plan.kind === "archive"
       ? [
-          ["URL", plan.url],
+          plan.urls.length === 1
+            ? ["URL", plan.urls[0]!]
+            : [`URLs (${plan.urls.length})`, plan.urls.join("\n")],
           ["Engine", ENGINE_LABELS[plan.engine] + (plan.cdpUrl ? ` at ${plan.cdpUrl}` : "")],
           ...(plan.engine === "cdp"
             ? [["Play media", yesNo(plan.playMedia)] as [string, string]]
