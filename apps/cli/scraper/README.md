@@ -117,11 +117,11 @@ Downloaded media is untrusted input, so ffmpeg only opens it as an ordinary loca
 
 The repo's `.mcp.json` gives Claude Code three MCP servers, so you can describe what you want and let the agent find, open, click through and save pages:
 
-| Server | What the agent gets | Needs |
-|---|---|---|
-| `firescrape` (this tool) | `archive_start` / `job_status` / `job_cancel` (background crawls with media and transcripts), `capture_page` / `capture_finish` (save the tab the agent is on, without reloading it), `scrape_page`, `transcribe_start`, `list_runs`, `read_archive_file` | Chrome on :9222 for CDP tools; whisper.cpp for transcription |
-| `playwright` ([Microsoft Playwright MCP](https://github.com/microsoft/playwright-mcp) 0.0.83) | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_navigate_back`, `browser_tabs`, … attached to the same Chrome | Chrome on :9222 |
-| `firecrawl` ([firecrawl-mcp](https://github.com/firecrawl/firecrawl-mcp-server) 3.24.0) | `firecrawl_search`, `firecrawl_map`, `firecrawl_scrape`, `firecrawl_crawl` against the self-hosted API | `task up` (API on :3002) |
+| Server                                                                                        | What the agent gets                                                                                                                                                                                                                                       | Needs                                                        |
+| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `firescrape` (this tool)                                                                      | `archive_start` / `job_status` / `job_cancel` (background crawls with media and transcripts), `capture_page` / `capture_finish` (save the tab the agent is on, without reloading it), `scrape_page`, `transcribe_start`, `list_runs`, `read_archive_file` | Chrome on :9222 for CDP tools; whisper.cpp for transcription |
+| `playwright` ([Microsoft Playwright MCP](https://github.com/microsoft/playwright-mcp) 0.0.83) | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_navigate_back`, `browser_tabs`, … attached to the same Chrome                                                                                                           | Chrome on :9222                                              |
+| `firecrawl` ([firecrawl-mcp](https://github.com/firecrawl/firecrawl-mcp-server) 3.24.0)       | `firecrawl_search`, `firecrawl_map`, `firecrawl_scrape`, `firecrawl_crawl` against the self-hosted API                                                                                                                                                    | `task up` (API on :3002)                                     |
 
 Start what they need, then run `claude` in the checkout root and approve the three project servers once:
 
@@ -130,7 +130,7 @@ task scraper:chrome     # dedicated Chrome with CDP on :9222; log in to your sit
 task up                 # only for the firecrawl_* tools
 ```
 
-Example prompt: *"Search for IELTS listening practice tests on oneielts.com. Open the first test with the browser tools, click Next through every part, call capture_page on each part with audio and transcription on, then capture_finish and summarise the transcripts."*
+Example prompt: _"Search for IELTS listening practice tests on oneielts.com. Open the first test with the browser tools, click Next through every part, call capture_page on each part with audio and transcription on, then capture_finish and summarise the transcripts."_
 
 - **Links vs clicks.** `archive_start` follows links in the HTML, which is fast and needs no model calls per page. Use the Playwright tools plus `capture_page` when content only appears after clicks (tabs, "Next" buttons, test steps). `capture_page` keeps each capture, even when the URL does not change (saved as `<page>-2`, `<page>-3`, …).
 - **Runs.** Captures of one site share a run under `data/<host>/` until `capture_finish` or a capture on another site. Its media and transcription settings come from the first capture. One archive or transcription job runs at a time.
