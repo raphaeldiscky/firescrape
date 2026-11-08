@@ -55,22 +55,21 @@ Results go into the checkout's `data/` directory, even when Task is invoked from
 
 ```text
 data/<hostname>/<UTC-timestamp>-<unique-id>/
-├── index.md                 # Browse pages, files, media and failures
+├── index.md                 # Each page with its media and transcript links, plus failures
 ├── manifest.json            # Engine, settings, status and all results
 ├── pages/<URL-path>--<hash>/
 │   ├── content.md
 │   ├── page.html
 │   ├── raw.html
 │   ├── page.json            # Metadata, links and media references
-│   └── screenshot.png       # CDP only, when capture succeeds
-├── assets/
-│   ├── images/
-│   ├── audio/
-│   └── videos/
-└── transcripts/             # With transcription: <media name>--<hash>.{txt,srt,vtt,json}
+│   ├── screenshot.png       # CDP only, when capture succeeds
+│   └── media/               # Audio and video found on this page
+│       ├── <name>--<hash>.mp3
+│       └── <name>--<hash>.{txt,srt,vtt,json}   # With transcription: next to its media
+└── assets/images/           # Images, shared across pages (mostly site-wide icons)
 ```
 
-The command prints the absolute output directory and `index.md` location. Without the dashboard (`--no-ui` or redirected output), media progress on stderr shows each item’s count, current file, bytes transferred, percentage when the server supplies a usable size, and elapsed seconds. A one-second heartbeat continues while waiting for a response or retrying, and each item ends with downloaded/reused/skipped/failed status. Interactive terminals update the current line; redirected output gets plain progress lines. Query strings are excluded from progress labels. `data/*` is gitignored. Runs never overwrite each other; URL hashes distinguish query variants, and shared media downloads once per run. These are content archives, not offline replicas: HTML keeps its original resource links, while `page.json` maps discovered assets to local files.
+The command prints the absolute output directory and `index.md` location. Without the dashboard (`--no-ui` or redirected output), media progress on stderr shows each item’s count, current file, bytes transferred, percentage when the server supplies a usable size, and elapsed seconds. A one-second heartbeat continues while waiting for a response or retrying, and each item ends with downloaded/reused/skipped/failed status. Interactive terminals update the current line; redirected output gets plain progress lines. Query strings are excluded from progress labels. `data/*` is gitignored. Runs never overwrite each other; URL hashes distinguish query variants, and shared media downloads once per run: audio or video used on several pages is stored in the folder of the first page that found it, and `index.md` lists it (with its transcript) under every page that uses it. Runs made before this layout keep `assets/audio/`, `assets/videos/` and `transcripts/`; `transcribe` still works on them. These are content archives, not offline replicas: HTML keeps its original resource links, while `page.json` maps discovered assets to local files.
 
 Defaults are **100 attempted pages**, **100 MB per media file** (decimal MB), and a **1,000 ms gap between pages**, processed sequentially. The size cap applies to each file. Use `--limit`, `--max-media-mb`, and `--delay-ms` to change these. `--media image,video,audio` limits which kinds are downloaded (all three by default); the others are listed in the manifest as skipped. Direct CLI usage is `pnpm exec tsx src/cli.ts archive URL --engine cdp` (CDP is its default).
 
@@ -99,7 +98,7 @@ Each transcript is written in four formats next to each other:
 | `.vtt`  | WebVTT subtitles                                                                             |
 | `.json` | whisper.cpp's full JSON: segments with millisecond offsets, tokens and the detected language |
 
-In an archive they go to `transcripts/`, and `manifest.json` (`transcripts[]`: status, files, language, duration, segment count) and `index.md` list them. A failed transcription marks the run `partial`.
+In an archive they are written next to their media in the page's `media/` folder (older runs: `transcripts/`), and `manifest.json` (`transcripts[]`: status, files, language, duration, segment count) and `index.md` list them. A failed transcription marks the run `partial`.
 
 **Workers.** Each worker is its own `whisper-cli` process with its own copy of the model (about 1 GB of GPU memory for the default model), so 2 workers transcribe two files at once; the CPU threads are split between workers. Default 2.
 

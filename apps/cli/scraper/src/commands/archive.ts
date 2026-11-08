@@ -11,7 +11,7 @@ import {
 import { downloadMedia, retryDelay, type MediaResult } from "../archive/download.js";
 import { TextReporter, type ArchiveReporter } from "../archive/reporter.js";
 import { ensureApiReady } from "../archive/local-api.js";
-import { createRun, pagePath } from "../archive/paths.js";
+import { createRun, pagePath, withoutExtension } from "../archive/paths.js";
 import {
   saveManifest,
   savePage,
@@ -172,12 +172,12 @@ export async function runArchive(
       if (!TRANSCRIBABLE.has(asset.kind) || transcripts.has(asset.path)) return;
       const entry: TranscriptEntry = { asset: asset.url, media: asset.path, status: "queued" };
       transcripts.set(asset.path, entry);
-      const stem = basename(asset.path, extname(asset.path));
       void transcriber
         .add({
           input: join(root, asset.path),
-          base: join(root, "transcripts", stem),
-          label: stem,
+          // Transcripts sit next to their media, inside the page folder.
+          base: join(root, withoutExtension(asset.path)),
+          label: basename(asset.path, extname(asset.path)),
         })
         .then((result) => {
           entry.status = result.status;
@@ -270,6 +270,7 @@ export async function runArchive(
                 } else if (!asset || !reused) {
                   asset = await downloadMedia(ref, {
                     root,
+                    pageDir: result.path,
                     maxBytes: opts.maxMediaMb * 1_000_000,
                     headers,
                     signal: opts.signal,
@@ -284,6 +285,10 @@ export async function runArchive(
             } finally {
               reporter.mediaDone();
             }
+            const playable = media
+              .filter((a) => TRANSCRIBABLE.has(a.kind) && a.status === "downloaded" && a.path)
+              .map((a) => a.path!);
+            if (playable.length > 0) result.media = [...new Set(playable)];
             result.status = "saved";
           }
           if (typeof data["warning"] === "string") result.warning = data["warning"];

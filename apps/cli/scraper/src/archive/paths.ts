@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export function checkoutRoot(): string {
@@ -15,6 +15,12 @@ export function checkoutRoot(): string {
     dir = parent;
   }
   return dir;
+}
+
+/** `a/b/name.mp3` → `a/b/name`; transcripts use this as their base path. */
+export function withoutExtension(path: string): string {
+  const ext = extname(path);
+  return ext ? path.slice(0, -ext.length) : path;
 }
 
 export function urlHash(url: string): string {
@@ -44,7 +50,17 @@ export function pagePath(url: string): string {
 
 const ASSET_DIRS = { image: "images", video: "videos", audio: "audio" } as const;
 
-export function assetPath(url: string, kind: keyof typeof ASSET_DIRS, contentType: string): string {
+/**
+ * Where a downloaded file goes, relative to the run root. Audio and video found on a
+ * page go into that page's `media/` folder (transcripts are written next to them);
+ * images are shared site-wide and stay in `assets/images/`.
+ */
+export function assetPath(
+  url: string,
+  kind: keyof typeof ASSET_DIRS,
+  contentType: string,
+  pageDir?: string,
+): string {
   const name = safePart(new URL(url).pathname.split("/").pop() || kind);
   const mimeExtensions: Record<string, string> = {
     "image/jpeg": ".jpg",
@@ -77,7 +93,10 @@ export function assetPath(url: string, kind: keyof typeof ASSET_DIRS, contentTyp
     )?.[0];
   const ext = mimeExtensions[contentType] ?? suffix ?? ".bin";
   const stem = suffix ? name.slice(0, -suffix.length) : name;
-  return `assets/${ASSET_DIRS[kind]}/${stem}--${urlHash(url)}${ext}`;
+  const file = `${stem}--${urlHash(url)}${ext}`;
+  return pageDir && kind !== "image"
+    ? `${pageDir}/media/${file}`
+    : `assets/${ASSET_DIRS[kind]}/${file}`;
 }
 
 export async function createRun(url: string, out?: string): Promise<string> {

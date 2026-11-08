@@ -90,7 +90,7 @@ describe("runTranscribe", () => {
         asset: "https://example.test/a.mp3",
         media: "media/a--1.mp3",
         status: "transcribed",
-        files: EXTENSIONS.map((ext) => `transcripts/a--1${ext}`),
+        files: EXTENSIONS.map((ext) => `media/a--1${ext}`),
         language: "en",
         durationSec: 4,
         segments: 3,
@@ -108,6 +108,24 @@ describe("runTranscribe", () => {
     expect(again.map((r) => r.status)).toEqual(["skipped"]);
     const resaved = JSON.parse(await readFile(join(dir, "manifest.json"), "utf8")) as Manifest;
     expect(resaved.transcripts?.[0]?.segments).toBe(3);
+  });
+
+  it("keeps the flat transcripts/ folder of runs made before per-page media", async () => {
+    await mkdir(join(dir, "media"));
+    await mkdir(join(dir, "transcripts"));
+    await writeFile(join(dir, "media/a--1.mp3"), "audio");
+    await writeFile(join(dir, "transcripts/a--1.txt"), "done earlier");
+    await writeFile(join(dir, "manifest.json"), JSON.stringify(manifest()));
+
+    const seen: string[] = [];
+    const results = await runTranscribe({
+      inputs: [dir],
+      workers: 1,
+      settings,
+      runner: fakeRunner(seen),
+    });
+    expect(results.map((r) => r.status)).toEqual(["skipped"]);
+    expect(seen).toEqual([]);
   });
 
   it("writes transcripts next to plain files and media found in folders", async () => {

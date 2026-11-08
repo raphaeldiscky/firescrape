@@ -33,6 +33,8 @@ export interface DownloadOptions {
   signal?: AbortSignal | undefined;
   timeoutMs?: number;
   onProgress?: (progress: MediaTransferProgress) => void;
+  /** The page folder (relative to `root`) that owns downloaded audio and video. */
+  pageDir?: string | undefined;
 }
 
 class TooLarge extends Error {}
@@ -110,7 +112,7 @@ export async function downloadMedia(ref: MediaRef, opts: DownloadOptions): Promi
         await response.body.cancel();
         throw new TooLarge("Exceeds media size limit");
       }
-      const rel = assetPath(ref.url, ref.kind, type);
+      const rel = assetPath(ref.url, ref.kind, type, opts.pageDir);
       const target = join(opts.root, rel);
       await mkdir(dirname(target), { recursive: true });
       temporary = `${target}.${randomUUID()}.part`;

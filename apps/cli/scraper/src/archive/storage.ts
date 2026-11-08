@@ -12,6 +12,11 @@ export interface PageResult {
   reason?: string;
   warning?: string;
   files?: string[];
+  /**
+   * Downloaded audio/video on this page, relative to the archive root. Usually inside
+   * this page's `media/` folder; a file shared with an earlier page stays in that page's.
+   */
+  media?: string[];
 }
 
 export interface Manifest {
@@ -99,6 +104,21 @@ function mdText(value: string): string {
   return value.replace(/[\r\n]/g, " ").replace(/[\\`*_[\]<>]/g, "\\$&");
 }
 
+const link = (label: string, path: string): string => `[${label}](${encodeURI(path)})`;
+
+/** `Audio: [name](path) · [Transcript](txt) · [SRT](…) …` for a page's media file. */
+function mediaLine(media: string, transcript: TranscriptEntry | undefined): string {
+  const name = media.slice(media.lastIndexOf("/") + 1);
+  const parts = [`Media: ${link(mdText(name), media)}`];
+  const files = transcript?.status === "failed" ? [] : (transcript?.files ?? []);
+  const txt = files.find((file) => file.endsWith(".txt"));
+  if (txt) parts.push(link("Transcript", txt));
+  for (const file of files.filter((f) => f !== txt))
+    parts.push(link(file.slice(file.lastIndexOf(".") + 1).toUpperCase(), file));
+  if (transcript && !txt) parts.push(`transcript ${transcript.status}`);
+  return parts.join(" · ");
+}
+
 export async function saveManifest(root: string, manifest: Manifest): Promise<void> {
   await jsonFile(join(root, "manifest.json"), manifest);
   const failed =
@@ -120,6 +140,7 @@ export async function saveManifest(root: string, manifest: Manifest): Promise<vo
     "## Pages",
     "",
   ];
+  const transcripts = new Map((manifest.transcripts ?? []).map((t) => [t.media, t]));
   for (const page of manifest.pages) {
     const label = mdText(page.title || page.url);
     const details = encodeURI(`${page.path}/page.json`);
@@ -134,6 +155,8 @@ export async function saveManifest(root: string, manifest: Manifest): Promise<vo
       if (name && page.files?.includes(name))
         lines.push(`  · [${fileLabel}](${encodeURI(`${page.path}/${name}`)})`);
     }
+    for (const media of page.media ?? [])
+      lines.push(`  · ${mediaLine(media, transcripts.get(media))}`);
     if (page.warning) lines.push(`  · ${mdText(page.warning)}`);
   }
   lines.push("", "## Media", "");

@@ -131,4 +131,17 @@ describe("archive paths", () => {
       /^assets\/audio\/track--[a-f0-9]{16}\.m4a$/,
     );
   });
+
+  it("puts a page's audio and video in its media folder and keeps images shared", () => {
+    const page = "pages/test/1--abc";
+    expect(assetPath("https://cdn.example.com/listen.mp3", "audio", "audio/mpeg", page)).toMatch(
+      /^pages\/test\/1--abc\/media\/listen--[a-f0-9]{16}\.mp3$/,
+    );
+    expect(assetPath("https://cdn.example.com/clip.mp4", "video", "video/mp4", page)).toMatch(
+      /^pages\/test\/1--abc\/media\/clip--[a-f0-9]{16}\.mp4$/,
+    );
+    expect(assetPath("https://cdn.example.com/logo.png", "image", "image/png", page)).toMatch(
+      /^assets\/images\/logo--[a-f0-9]{16}\.png$/,
+    );
+  });
 });

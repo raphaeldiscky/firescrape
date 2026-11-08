@@ -165,7 +165,12 @@ describe("site archives", () => {
       [`${base}/listen.mp3`, "downloaded"],
       [`${base}/track?id=7`, "downloaded"],
     ]);
-    for (const asset of audio) expect(asset.path).toMatch(/^assets\/audio\/.+\.mp3$/);
+    // Audio lives in the folder of the page it was found on.
+    const pageDir = manifest.pages[0]!.path;
+    for (const asset of audio)
+      expect(asset.path).toMatch(new RegExp(`^${pageDir}/media/.+\\.mp3$`));
+    expect(manifest.pages[0]!.media).toEqual(expect.arrayContaining(audio.map((a) => a.path)));
+    expect(manifest.assets.find((a) => a.kind === "image")?.path).toMatch(/^assets\/images\//);
     const saved = await Promise.all(audio.map((a) => readFile(join(root, a.path!), "utf8")));
     expect(saved).toEqual(["audio", "audio"]);
     expect(manifest.settings.playMedia).toBe(false);
@@ -234,9 +239,18 @@ describe("site archives", () => {
     for (const t of transcripts) {
       expect(t.status).toBe("transcribed");
       expect(t.segments).toBe(2);
-      expect(t.files?.[3]).toMatch(/^transcripts\/.+--[0-9a-f]+\.txt$/);
+      // Each transcript sits next to its media file inside the page folder.
+      expect(t.media).toMatch(/^pages\/.+\/media\//);
+      expect(t.files?.[3]).toBe(t.media.replace(/\.[^.]+$/, ".txt"));
     }
+    // movie.mp4 is on both pages: stored once under the first, listed under both.
+    const [first, second] = manifest.pages;
+    const movie = transcripts.find((t) => t.asset === `${base}/movie.mp4`)!.media;
+    expect(movie.startsWith(`${first!.path}/media/`)).toBe(true);
+    expect(second!.media).toEqual([movie]);
     const index = await readFile(join(root, "index.md"), "utf8");
+    const movieLine = `Media: [${movie.slice(movie.lastIndexOf("/") + 1)}](${encodeURI(movie)}) · [Transcript]`;
+    expect(index.split(movieLine)).toHaveLength(3);
     expect(index).toContain("## Transcripts");
     expect(index).toMatch(/2 segments, 3s · \[SRT\]/);
   });

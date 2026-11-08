@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { cpus } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
+import { withoutExtension } from "../archive/paths.js";
 import { saveManifest, type Manifest, type TranscriptEntry } from "../archive/storage.js";
 import {
   TranscribeQueue,
@@ -89,10 +90,14 @@ async function archivePlan(root: string): Promise<ArchivePlan> {
     )
     .map((a) => {
       const stem = basename(a.path!, extname(a.path!));
+      // Runs from before per-page media kept transcripts in a flat transcripts/ folder;
+      // keep using it there so finished transcripts are skipped, not redone.
+      const legacy = join(root, "transcripts", stem);
+      const base = existsSync(`${legacy}.txt`) ? legacy : join(root, withoutExtension(a.path!));
       return {
         asset: a.url,
         media: a.path!,
-        job: { input: join(root, a.path!), base: join(root, "transcripts", stem), label: stem },
+        job: { input: join(root, a.path!), base, label: stem },
       };
     });
   return { root, manifest, jobs };
@@ -114,8 +119,7 @@ function entry(asset: string, media: string, root: string, r: TranscriptResult):
 type Found = { kind: "archive"; plan: ArchivePlan } | { kind: "files"; jobs: TranscribeJob[] };
 
 function fileJob(file: string): TranscribeJob {
-  const ext = extname(file);
-  return { input: file, base: ext ? file.slice(0, -ext.length) : file, label: basename(file) };
+  return { input: file, base: withoutExtension(file), label: basename(file) };
 }
 
 /** An archive run directory, a single media file, or a folder searched for media. */

@@ -64,7 +64,7 @@ export async function executePlan(
     const status = signal.aborted ? "interrupted" : failed > 0 ? "partial" : "completed";
     store.finish(
       status,
-      `${done} transcribed, ${skipped} skipped, ${failed} failed; transcripts are next to each file or in the run's transcripts/`,
+      `${done} transcribed, ${skipped} skipped, ${failed} failed; transcripts are next to each media file`,
     );
     return signal.aborted ? 130 : failed > 0 ? 1 : 0;
   } catch (err) {
