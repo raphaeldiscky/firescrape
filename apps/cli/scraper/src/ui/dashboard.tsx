@@ -48,6 +48,7 @@ export interface DashboardState {
 }
 
 const MAX_ERRORS = 5;
+const MAX_ERROR_LENGTH = 200;
 const LOG_LINES = 6;
 
 /** Holds dashboard state outside React so run code can update it from anywhere. */
@@ -78,7 +79,10 @@ export class DashboardStore {
   }
 
   error(message: string): void {
-    this.update((s) => ({ ...s, errors: [...s.errors, message].slice(-MAX_ERRORS) }));
+    // Errors can carry whole response bodies; keep each to one short line.
+    const line = message.replace(/\s+/g, " ").trim();
+    const short = line.length > MAX_ERROR_LENGTH ? `${line.slice(0, MAX_ERROR_LENGTH - 1)}…` : line;
+    this.update((s) => ({ ...s, errors: [...s.errors, short].slice(-MAX_ERRORS) }));
   }
 
   transcription(event: TranscribeEvent): void {

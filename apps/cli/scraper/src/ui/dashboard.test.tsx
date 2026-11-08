@@ -109,6 +109,19 @@ describe("Dashboard", () => {
     ui.unmount();
   });
 
+  it("keeps each error to one short line", async () => {
+    const store = new DashboardStore("Archiving");
+    const ui = render(<Dashboard store={store} />);
+    store.error(`https://x.test/: 501 <!DOCTYPE HTML>\n<html>\n  <body>${"x".repeat(400)}</body>`);
+    await settle();
+
+    const errorLines = (ui.lastFrame() ?? "").split("\n").filter((l) => l.includes("x.test"));
+    expect(errorLines).toHaveLength(1);
+    expect(errorLines[0]).toContain("501 <!DOCTYPE HTML> <html> <body>xxx");
+    expect(store.getSnapshot().errors[0]).toHaveLength(200);
+    ui.unmount();
+  });
+
   it("formats byte counts", () => {
     expect(formatBytes(900)).toBe("900 B");
     expect(formatBytes(1536)).toBe("1.5 KB");
